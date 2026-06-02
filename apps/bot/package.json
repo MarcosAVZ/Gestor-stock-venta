@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest --passWithNoTests",
-    "lint": "eslint . --max-warnings=0",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --max-warnings=0 --no-error-on-unmatched-pattern",
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
