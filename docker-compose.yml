@@ -1,0 +1,78 @@
+# Docker Compose para Sistema de Gestión de Compras WhatsApp (MVP, PR1)
+#
+# Levanta solo Postgres en este PR. El servicio `bot` se agregará en PR3
+# cuando exista el Dockerfile de apps/bot (incluye tesseract-ocr-spa + sharp).
+#
+# Levantar:  docker compose up -d
+# Logs:       docker compose logs -f postgres
+# Parar:      docker compose down
+# Reset:      docker compose down -v   (borra el volumen pgdata, DB limpia)
+#
+# Variables de entorno se leen de .env en este directorio. Ver .env.example.
+
+name: sgcw
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sgcw-postgres
+    restart: unless-stopped
+    # Variables de entorno leídas del archivo .env (no commiteado).
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sgcw}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD requerido en .env}
+      POSTGRES_DB: ${POSTGRES_DB:-sgcw}
+      # Para evitar mensajes de warning de "locale" en logs.
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+    # Mapeo de puerto para inspección con psql o herramientas locales.
+    # En producción (docker swarm / k8s) no se expone al host.
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    # Volumen persistente para datos de la DB (NO se borra con `docker compose down`).
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Healthcheck: pg_isready retorna 0 cuando la DB acepta conexiones.
+    # Otros servicios pueden usar `depends_on: condition: service_healthy`.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sgcw} -d ${POSTGRES_DB:-sgcw}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    # Red dedicada del stack.
+    networks:
+      - sgcw_net
+
+  # Servicio `bot` se agregará en PR3 (requiere Dockerfile con tesseract-ocr).
+  # Estructura planeada:
+  #   bot:
+  #     build: ./apps/bot
+  #     depends_on:
+  #       postgres:
+  #         condition: service_healthy
+  #     environment:
+  #       DATABASE_URL: postgresql://${POSTGRES_USER}:${DB_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  #       OWNER_PHONE_NUMBERS: ${OWNER_PHONE_NUMBERS}
+  #       NODE_ENV: production
+  #       LOG_LEVEL: ${LOG_LEVEL:-info}
+  #     volumes:
+  #       - bot_data:/app/data
+  #     healthcheck:
+  #       test: ["CMD", "node", "--eval", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1))"]
+  #       interval: 30s
+  #       timeout: 5s
+  #       retries: 3
+  #     networks:
+  #       - sgcw_net
+
+volumes:
+  pgdata:
+    name: sgcw_pgdata
+  # bot_data:
+  #   name: sgcw_botdata   # se agregará en PR3
+
+networks:
+  sgcw_net:
+    name: sgcw_net
+    driver: bridge
