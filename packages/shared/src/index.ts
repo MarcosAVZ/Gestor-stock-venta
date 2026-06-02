@@ -8,3 +8,14 @@
  */
 
 export const VERSION = '0.1.0';
+
+// DTOs y schemas reusables (PR4).
+export {
+  OCRProductSchema,
+  OCRResultSchema,
+  UnidadSchema,
+  EMPTY_OCR_RESULT,
+  type OCRProduct,
+  type OCRResult,
+  type Unidad,
+} from './dtos/OCRResult.ts';

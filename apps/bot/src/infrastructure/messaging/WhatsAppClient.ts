@@ -66,8 +66,12 @@ export interface WhatsAppMessagingPort {
   sendText(to: string, text: string): Promise<void>;
   /** Envía una imagen desde un path local a un chat. */
   sendImage(to: string, filePath: string, caption?: string): Promise<void>;
-  /** Descarga la media de un mensaje y la persiste a `destPath`. */
-  downloadMedia(msg: WAWebJSMessage, destPath: string): Promise<string>;
+  /** Descarga la media de un mensaje y devuelve el buffer.
+   *  PR4: el port ya NO escribe a disco — esa responsabilidad
+   *  pasó a `LocalImageStorage` (ver `infrastructure/storage/`).
+   *  Beneficios: el port es simétrico, testeable con mocks
+   *  simples, y el storage tiene su propio owner. */
+  downloadMedia(msg: WAWebJSMessage): Promise<Buffer>;
   /** Registra el handler para mensajes entrantes. */
   onIncomingMessage(handler: IncomingMessageHandler): void;
   /** Cierra la sesión limpiamente. */
@@ -169,23 +173,15 @@ export class WhatsAppWebJsAdapter implements WhatsAppMessagingPort {
     );
   }
 
-  async downloadMedia(msg: WAWebJSMessage, destPath: string): Promise<string> {
+  async downloadMedia(msg: WAWebJSMessage): Promise<Buffer> {
     this.assertReady();
-    // El caller pre-armó el path; nosotros delegamos al cliente.
-    // La razón de no hacer la I/O acá es que el caller (eventDispatcher,
-    // task 3.8) controla dónde guarda según `IMAGES_PATH/<phone>/...`.
-    // Este método existe para mantener el port simétrico y para que
-    // un mock del adapter en tests pueda verificar la intención.
+    // PR4 refactor: el port solo descarga y devuelve bytes. La
+    // persistencia a disco la hace `LocalImageStorage` (inyectado
+    // en el eventDispatcher). Esto desacopla la capa de mensajería
+    // de la capa de filesystem.
     if (typeof msg.downloadMedia === 'function') {
       const media = await msg.downloadMedia();
-      // Persistimos el base64 a disco. Esto evita acoplar el port
-      // a fs — el caller ya conoce el destPath, nosotros solo escribimos.
-      const buffer = Buffer.from(media.data, 'base64');
-      const { writeFile, mkdir } = await import('node:fs/promises');
-      const { dirname } = await import('node:path');
-      await mkdir(dirname(destPath), { recursive: true });
-      await writeFile(destPath, buffer);
-      return destPath;
+      return Buffer.from(media.data, 'base64');
     }
     throw new Error('WhatsAppWebJsAdapter.downloadMedia: msg has no downloadMedia method');
   }
