@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment files (NEVER commit secrets)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Coverage
+coverage/
+*.lcov
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Runtime data (volumes mounted in docker)
+data/
+apps/bot/data/session/
+apps/bot/data/images/
+apps/bot/data/*.log
+
+# Test artifacts
+.nyc_output/
+.vitest-cache/
+
+# OS
+.DS_Store
+desktop.ini
+
+# Internal tooling (Gentle AI / Engram caches, never project source)
+.atl/
