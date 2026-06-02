@@ -1,0 +1,25 @@
+{
+  "name": "@compras-whatsapp/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Prisma schema, generated client, and repository implementations. Provides @compras-whatsapp/db to apps/bot.",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "echo 'packages/db: stub - no source in PR1' && exit 0"
+  },
+  "dependencies": {
+    "@compras-whatsapp/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
