@@ -21,6 +21,13 @@
 import { ConversationState, type Unidad } from '@compras-whatsapp/db';
 import type { Logger } from 'pino';
 
+import {
+  cantidadSchema,
+  opcionSiNoSchema,
+  opcionUnidadSchema,
+  precioSchema,
+} from '@compras-whatsapp/shared';
+
 import { logSecurityEvent } from '../../infrastructure/logging/logger.ts';
 import {
   INACTIVITY_TIMEOUT_MS,
@@ -242,44 +249,36 @@ function inputToEvent(
     return null;
   }
 
-  // YES/NO
-  if (['si', 'sí', 's', 'yes', 'y', 'ok', 'dale'].includes(lower)) {
-    return { type: 'USUARIO_CONFIRMA' };
-  }
-  if (['no', 'n', 'mal', 'incorrecto'].includes(lower)) {
-    return { type: 'USUARIO_RECHAZA' };
+  // YES/NO (PR5: usa el schema Zod `opcionSiNoSchema` que ya mapea
+  // "si/sí/s/yes/y/ok/dale/1" → "si" y "no/n/mal/incorrecto/2" → "no").
+  const siNo = opcionSiNoSchema.safeParse(lower);
+  if (siNo.success) {
+    return siNo.data === 'si' ? { type: 'USUARIO_CONFIRMA' } : { type: 'USUARIO_RECHAZA' };
   }
   if (lower === 'corregir' || lower.startsWith('cambiar ')) {
     const campo = lower.startsWith('cambiar ') ? text.slice(8) : 'general';
     return { type: 'USUARIO_CORRIGE', campo };
   }
 
-  // NUMERIC INPUTS
+  // NUMERIC INPUTS (PR5: usa los schemas Zod de shared).
   if (state === ConversationState.PREGUNTANDO_CANTIDAD) {
-    const n = Number(text);
-    if (Number.isFinite(n) && Number.isInteger(n)) return { type: 'CANTIDAD_RECIBIDA', valor: n };
+    const parsed = cantidadSchema.safeParse(Number(text));
+    if (parsed.success) return { type: 'CANTIDAD_RECIBIDA', valor: parsed.data };
   }
   if (state === ConversationState.PREGUNTANDO_PRECIO_VENTA) {
-    const n = Number(text.replace(',', '.'));
-    if (Number.isFinite(n) && n > 0) return { type: 'PRECIO_RECIBIDO', valor: n };
+    // `precioSchema` acepta string ARS con prefijos/separadores, lo
+    // que evita que el usuario tenga que tipear `1234.5` o `1234,5`
+    // a mano — aceptamos `$1.500`, `AR$ 1.500,00`, etc.
+    const parsed = precioSchema.safeParse(text);
+    if (parsed.success) return { type: 'PRECIO_RECIBIDO', valor: parsed.data };
   }
 
-  // UNIDAD
+  // UNIDAD (PR5: usa el schema Zod `opcionUnidadSchema`).
   if (state === ConversationState.PREGUNTANDO_UNIDAD) {
-    const u = parseUnidad(lower);
-    if (u !== null) return { type: 'UNIDAD_RECIBIDA', valor: u };
+    const parsed = opcionUnidadSchema.safeParse(lower);
+    if (parsed.success) return { type: 'UNIDAD_RECIBIDA', valor: parsed.data };
   }
 
-  return null;
-}
-
-/** Mapea texto libre a enum Unidad. */
-function parseUnidad(text: string): Unidad | null {
-  if (['unidad', 'unidades', 'u'].includes(text)) return 'UNIDAD';
-  if (['par', 'pares'].includes(text)) return 'PAR';
-  if (['pack', 'packs'].includes(text)) return 'PACK';
-  if (['caja', 'cajas'].includes(text)) return 'CAJA';
-  if (['otro', 'otra'].includes(text)) return 'OTRO';
   return null;
 }
 
