@@ -42,6 +42,58 @@ Bot de WhatsApp que registra compras mayoristas (Temu, AliExpress, Shein, Mercad
 | Monorepo | pnpm workspaces |
 | Tests | vitest |
 
+## Cómo usar el bot
+
+Una vez que el bot está corriendo (`pnpm dev` o `docker compose up bot`):
+
+1. **Primera vez**: escaneás el QR que aparece en consola con WhatsApp (ver [Cómo escanear QR la primera vez](#cómo-escanear-qr-la-primera-vez)).
+2. **Mandás una captura** de tu compra (Temu, AliExpress, Shein, MercadoLibre, etc.).
+3. El bot hace OCR y te pregunta: *"Detecté: medias negras, costo lote $1.500. ¿Es correcto?"*
+4. Respondés **sí** o **no**. Si sí, te pregunta cantidad, unidad y precio de venta.
+5. Al final te muestra un resumen con la ganancia estimada. Confirmás con **sí** y queda guardada.
+6. En cualquier momento podés pedirle datos con los [comandos disponibles](#comandos-disponibles).
+
+> El bot **no manda mensajes automáticos a contactos no whitelisted**: solo procesa mensajes de números en `OWNER_PHONE_NUMBERS` (OWASP A01).
+
+## Comandos disponibles
+
+Manda cualquiera de estos en cualquier momento (incluso a mitad de una carga):
+
+| Comando | Ejemplo | Qué hace |
+|---------|---------|----------|
+| `resumen` | `resumen` | Total del mes: N compras, invertido $X, ganancia potencial $Y. |
+| `estadisticas` | `estadisticas` | Totales históricos: N compras, M items, ticket promedio. |
+| `ganancias` | `ganancias` | Suma de ganancia potencial acumulada. |
+| `productos` | `productos` | Lista de productos únicos cargados con su cantidad de cargas. |
+| `stock` | `stock` | Lista de productos únicos con stock total (suma de cantidades). |
+| `producto <nombre>` | `producto medias negras` | Detalle de un producto (búsqueda exacta, fallback fuzzy). |
+| `compras mes` | `compras mes` | Listado de compras del mes actual con fecha + total. |
+| `top ganancias` | `top ganancias` | Top 5 items por ganancia unitaria (cross-usuario). |
+| `cancelar` | `cancelar` | Cancela la operación en curso y vuelve al estado inicial. |
+| `menu` | `menu` | Vuelve al estado inicial sin cancelar la conversación. |
+
+Si mandás un texto que no matchea ningún comando, el bot te contesta: *"No entendí. Comandos: resumen, estadisticas, ..."*.
+
+## Cómo escanear QR la primera vez
+
+> [Screenshot del QR en consola iria aqui]
+
+1. Levantá el bot con `docker compose up bot` o `pnpm dev`.
+2. En la consola aparece un QR en formato ASCII. El bot loggea `whatsapp_qr_ready` cuando lo emite.
+3. Abrí WhatsApp en tu celular → ⋮ Menú → **Dispositivos vinculados** → **Vincular un dispositivo**.
+4. Apuntá la cámara al QR de la consola.
+5. La sesión queda guardada en `apps/bot/data/session/` y persiste entre reinicios (`whatsapp_session_restored`).
+
+## Troubleshooting OCR
+
+Si el bot te dice *"No pude leer bien la imagen"* o *"No detecté un producto claro"*:
+
+- **Captura más recortada**: que se vea solo el producto, precio y cantidad — sin barras de navegación ni teclado.
+- **Buena iluminación**: capturas con flash o luz directa funcionan mejor. Tesseract es sensible a sombras.
+- **Letra legible**: si el precio está en una fuente muy decorativa, probá sacando foto con zoom.
+- **Formato estándar**: `producto`, `$1.500` o `AR$ 1.500`, `12 unidades` (en ese orden). El parser busca estas tres cosas.
+- **Si el OCR sigue fallando**, podés cargar manualmente contestando "no" cuando te pregunta si el producto detectado es correcto y tipeando los datos a mano.
+
 ## Setup rápido
 
 ```bash
