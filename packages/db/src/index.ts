@@ -1,12 +1,33 @@
 /**
  * @compras-whatsapp/db — punto de entrada público del paquete.
  *
- * En PR1 este archivo es un placeholder para que el typecheck del
- * workspace no falle por "no inputs". El contenido real (Prisma client
- * generado, repositorios, seed) llega en PR2.
+ * Re-exporta el PrismaClient singleton y los tipos generados del schema.
+ * Las implementaciones de los repositorios viven en apps/bot
+ * (interfaces en domain, adapters Prisma en infrastructure).
+ *
+ * Convenciones:
+ * - Importar tipos con `import type` para que type-stripping los borre.
+ * - El runtime solo expone `prisma` y `disconnectPrisma`; todo lo demás
+ *   es tipo puro.
  */
 
-// Placeholder export: evita que TS marque el módulo como vacío.
-// Será reemplazado en PR2 por re-exports del PrismaClient y las
-// implementaciones de los repos.
-export const DB_VERSION = '0.0.0-stub';
+export { prisma, disconnectPrisma } from './client.ts';
+
+// Re-exports de tipos generados por Prisma (puros, no runtime).
+export type {
+  Usuario,
+  Compra,
+  ItemCompra,
+  Conversacion,
+  Prisma,
+} from '@prisma/client';
+
+// Enums (Prisma los emite como const objects en runtime, pero los
+// re-exportamos como type + value para que el código de aplicación
+// pueda hacer `Unidad.PAR` y `function foo(u: Unidad) {...}` sin
+// doble import).
+export {
+  Unidad,
+  Moneda,
+  ConversationState,
+} from '@prisma/client';
