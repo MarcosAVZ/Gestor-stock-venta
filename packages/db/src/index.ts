@@ -19,8 +19,15 @@ export type {
   Compra,
   ItemCompra,
   Conversacion,
-  Prisma,
 } from '@prisma/client';
+
+// `Prisma` es a la vez namespace runtime (Prisma.sql, Prisma.empty,
+// Prisma.PrismaClientKnownRequestError) y namespace de tipos
+// (Prisma.InputJsonValue, Prisma.Sql). Lo re-exportamos como valor
+// para que los adapters de repositorio puedan usar `Prisma.sql` para
+// queries parametrizadas (req-prisma-schema) — los tipos quedan
+// disponibles implícitamente al importarlo.
+export { Prisma } from '@prisma/client';
 
 // Enums (Prisma los emite como const objects en runtime, pero los
 // re-exportamos como type + value para que el código de aplicación

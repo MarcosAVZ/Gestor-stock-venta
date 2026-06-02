@@ -93,7 +93,6 @@ describe('AppError hierarchy', () => {
     test('metadata is frozen (cannot be mutated)', () => {
       const err = new ValidationError('x', { metadata: { a: 1 } });
       expect(() => {
-        // @ts-expect-error — intentando mutar un frozen object
         (err.metadata as Record<string, unknown>)['a'] = 2;
       }).toThrow();
     });
