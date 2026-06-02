@@ -29,6 +29,7 @@ import { z } from 'zod';
 
 /** Unidad normalizada al enum de Prisma (const object). */
 export const UnidadSchema = z.enum(['UNIDAD', 'PAR', 'PACK', 'CAJA', 'OTRO']);
+export type Unidad = z.infer<typeof UnidadSchema>;
 
 /** Producto detectado por OCR (un item en la captura). */
 export const OCRProductSchema = z.object({

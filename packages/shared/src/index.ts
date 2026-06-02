@@ -17,4 +17,5 @@ export {
   EMPTY_OCR_RESULT,
   type OCRProduct,
   type OCRResult,
+  type Unidad,
 } from './dtos/OCRResult.ts';
