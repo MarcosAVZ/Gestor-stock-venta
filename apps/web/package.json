@@ -1,6 +1,6 @@
 {
   "name": "@compras-whatsapp/web",
-  "version": "0.0.0",
+  "version": "0.1.0-mvp",
   "private": true,
   "type": "module",
   "description": "React dashboard (Fase 2). Stub vacío en este PR; se llenará con Vite + React + Tailwind + shadcn/ui.",

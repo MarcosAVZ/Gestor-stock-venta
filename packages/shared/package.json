@@ -1,6 +1,6 @@
 {
   "name": "@compras-whatsapp/shared",
-  "version": "0.1.0",
+  "version": "0.1.0-mvp",
   "private": true,
   "type": "module",
   "description": "Cross-package utilities: Zod schemas, TypeScript types, AppError hierarchy, conversation state constants, DTOs.",

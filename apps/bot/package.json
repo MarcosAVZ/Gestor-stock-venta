@@ -1,6 +1,6 @@
 {
   "name": "@compras-whatsapp/bot",
-  "version": "0.0.0",
+  "version": "0.1.0-mvp",
   "private": true,
   "type": "module",
   "description": "WhatsApp bot + Express API. Receives capturas, runs OCR, drives the conversation state machine, persists to PostgreSQL.",

@@ -1,6 +1,6 @@
 {
   "name": "@compras-whatsapp/db",
-  "version": "0.1.0",
+  "version": "0.1.0-mvp",
   "private": true,
   "type": "module",
   "description": "Prisma schema, generated client, and DB-level helpers. Provides @compras-whatsapp/db to apps/bot.",
