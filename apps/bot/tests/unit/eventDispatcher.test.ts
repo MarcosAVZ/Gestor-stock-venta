@@ -1,31 +1,33 @@
 /**
  * Tests del EventDispatcher.
  *
- * Cubrimos los 4 paths críticos:
+ * Cubrimos los paths críticos:
  *   1. Texto: pasa al use case, envía respuestas.
- *   2. Imagen: descarga a disco, pasa imagePath al use case, envía respuestas.
- *   3. Imagen con error de mkdir: avisa al user, NO llama al use case.
- *   4. Imagen con error de download: avisa al user, NO llama al use case.
+ *   2. Imagen: descarga buffer, persiste vía LocalImageStorage,
+ *      pasa imagePath al use case, envía respuestas.
+ *   3. Imagen con error de download: avisa al user, NO llama al use case.
+ *   4. Imagen con error de storage: avisa al user, NO llama al use case.
  *   5. Use case lanza excepción: catch defensivo, avisa al user.
  *   6. Port.sendText falla: loggea pero NO crashea (best-effort).
- *   7. Helper `extractPhone` y `buildImagePath` (unit tests puros).
+ *   7. Helper `extractPhone` (unit test puro).
  *   8. processedCount incrementa correctamente.
  *
  * Mocks:
  *   - `port`: fake que implementa `WhatsAppMessagingPort` con in-memory maps.
+ *   - `imageStorage`: fake in-memory con `save()` y `getPath()`.
  *   - `use case deps`: mocks de Logger, RateLimiter, repos, etc.
  */
 
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import type { Message as WAWebJSMessage } from 'whatsapp-web.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from 'pino';
 import { ConversationState, type Conversacion } from '@compras-whatsapp/db';
 
-import { buildEventDispatcher, buildImagePath, extractPhone } from '../../src/interface/whatsapp/eventDispatcher.ts';
+import { buildEventDispatcher, extractPhone } from '../../src/interface/whatsapp/eventDispatcher.ts';
 import type {
   IncomingMessage,
   WhatsAppMessagingPort,
@@ -33,6 +35,7 @@ import type {
 import type { ConversacionRepository } from '../../src/domain/repositories/ConversacionRepository.ts';
 import type { UsuarioRepository } from '../../src/domain/repositories/UsuarioRepository.ts';
 import type { RateLimiter } from '../../src/infrastructure/messaging/rateLimiter.ts';
+import { LocalImageStorage } from '../../src/infrastructure/storage/LocalImageStorage.ts';
 
 // ── Fakes ─────────────────────────────────────────────────────────
 
@@ -52,14 +55,14 @@ function silentLogger(): Logger {
 
 interface FakePort extends WhatsAppMessagingPort {
   sentTexts: Map<string, string[]>;
-  downloadCalls: Array<{ msg: WAWebJSMessage; destPath: string }>;
+  downloadCalls: Array<{ msg: WAWebJSMessage }>;
   failNextDownload: boolean;
   failNextSend: boolean;
 }
 
 function buildFakePort(): FakePort {
   const sentTexts = new Map<string, string[]>();
-  const downloadCalls: Array<{ msg: WAWebJSMessage; destPath: string }> = [];
+  const downloadCalls: Array<{ msg: WAWebJSMessage }> = [];
   let failNextDownload = false;
   let failNextSend = false;
   const port: FakePort = {
@@ -88,13 +91,13 @@ function buildFakePort(): FakePort {
       sentTexts.set(to, list);
     },
     sendImage: async () => undefined,
-    downloadMedia: async (msg, destPath) => {
+    downloadMedia: async (msg) => {
       if (failNextDownload) {
         failNextDownload = false;
         throw new Error('fake download failure');
       }
-      downloadCalls.push({ msg, destPath });
-      return destPath;
+      downloadCalls.push({ msg });
+      return Buffer.from('fake-image-bytes');
     },
     onIncomingMessage: () => undefined,
     destroy: async () => undefined,
@@ -155,10 +158,11 @@ function buildMockRateLimiter(): RateLimiter {
   } as unknown as RateLimiter;
 }
 
-function buildDeps(port: WhatsAppMessagingPort, imagesPath: string) {
+function buildDeps(port: WhatsAppMessagingPort, imageStorage: LocalImageStorage) {
   return {
     port,
-    config: { imagesPath },
+    config: {},
+    imageStorage,
     logger: silentLogger(),
     rateLimiter: buildMockRateLimiter(),
     conversacionRepo: buildMockConversacionRepo(null),
@@ -196,36 +200,22 @@ describe('extractPhone', () => {
   });
 });
 
-describe('buildImagePath', () => {
-  it('builds <base>/<phone>/<ts>.<ext>', () => {
-    const ts = new Date('2026-06-02T15:30:00Z');
-    const result = buildImagePath('/data/images', '5491112345678', ts, 'jpg');
-    expect(result).toBe(
-      path.join('/data/images', '5491112345678', `${ts.getTime()}.jpg`),
-    );
-  });
-
-  it('sanitizes non-digit chars from phone', () => {
-    const ts = new Date('2026-06-02T15:30:00Z');
-    const result = buildImagePath('/data/images', '+54-911-1234-5678', ts, 'jpg');
-    expect(result).toContain(path.join('5491112345678', `${ts.getTime()}.jpg`));
-  });
-});
-
 // ── Tests del dispatcher ──────────────────────────────────────────
 
 describe('EventDispatcher', () => {
   let tmpDir: string;
+  let imageStorage: LocalImageStorage;
   beforeEach(async () => {
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dispatcher-'));
+    tmpDir = await mkdtemp(join(tmpdir(), 'dispatcher-'));
+    imageStorage = new LocalImageStorage({ rootPath: tmpDir, logger: silentLogger() });
   });
   afterEach(async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    await rm(tmpDir, { recursive: true, force: true });
   });
 
   it('text message: passes body to use case, sends response', async () => {
     const port = buildFakePort();
-    const deps = buildDeps(port, tmpDir);
+    const deps = buildDeps(port, imageStorage);
     const { handle } = buildEventDispatcher(deps);
 
     // Re-mock use case deps to capture the input.
@@ -248,9 +238,9 @@ describe('EventDispatcher', () => {
     expect(inputCapture.length).toBe(0); // no captura acá, pero verificamos side effect
   });
 
-  it('image message: downloads to <imagesPath>/<phone>/<ts>.<ext>, passes imagePath to use case', async () => {
+  it('image message: downloads buffer, persists via imageStorage, passes imagePath to use case', async () => {
     const port = buildFakePort();
-    const deps = buildDeps(port, tmpDir);
+    const deps = buildDeps(port, imageStorage);
     const { handle } = buildEventDispatcher(deps);
 
     deps.conversacionRepo.findByUsuarioId = vi.fn(async () => ({
@@ -262,26 +252,20 @@ describe('EventDispatcher', () => {
       updatedAt: new Date(),
     } satisfies Conversacion));
 
-    const before = Date.now();
     await handle(buildIncoming({ type: 'image', hasMedia: true, body: undefined }));
-    const after = Date.now();
 
     expect(port.downloadCalls.length).toBe(1);
-    const dest = port.downloadCalls[0]?.destPath ?? '';
-    expect(dest.startsWith(tmpDir)).toBe(true);
-    expect(dest).toMatch(/5491112345678\\\d+\.jpg$/);
-    // Timestamp dentro del rango
-    const tsMatch = dest.match(/(\d+)\.jpg$/);
-    expect(tsMatch).not.toBeNull();
-    const ts = Number(tsMatch?.[1] ?? 0);
-    expect(ts).toBeGreaterThanOrEqual(before);
-    expect(ts).toBeLessThanOrEqual(after);
+    // El archivo persistido debe estar en `<tmpDir>/<phone>/<file>.jpg`
+    const dir = join(tmpDir, '5491112345678');
+    const files = await readdir(dir);
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(/\.jpg$/);
   });
 
   it('image download failure: sends apology, does NOT call use case', async () => {
     const port = buildFakePort();
     port.failNextDownload = true;
-    const deps = buildDeps(port, tmpDir);
+    const deps = buildDeps(port, imageStorage);
     const { handle } = buildEventDispatcher(deps);
 
     const findByUsuarioIdSpy = vi.spyOn(deps.conversacionRepo, 'findByUsuarioId');
@@ -294,7 +278,7 @@ describe('EventDispatcher', () => {
 
   it('use case throws: catch defensivo, sends apology, does NOT propagate', async () => {
     const port = buildFakePort();
-    const deps = buildDeps(port, tmpDir);
+    const deps = buildDeps(port, imageStorage);
     const { handle } = buildEventDispatcher(deps);
 
     // Forzamos un throw re-mockeando findByUsuarioId para que lance.
@@ -309,7 +293,7 @@ describe('EventDispatcher', () => {
 
   it('port.sendText fails: continues to next response, does NOT crash', async () => {
     const port = buildFakePort();
-    const deps = buildDeps(port, tmpDir);
+    const deps = buildDeps(port, imageStorage);
     deps.conversacionRepo.findByUsuarioId = vi.fn(async () => ({
       id: 'conv-1',
       usuarioId: 'u-1',
@@ -328,7 +312,7 @@ describe('EventDispatcher', () => {
 
   it('processed() counter increments per call', async () => {
     const port = buildFakePort();
-    const deps = buildDeps(port, tmpDir);
+    const deps = buildDeps(port, imageStorage);
     deps.conversacionRepo.findByUsuarioId = vi.fn(async () => ({
       id: 'conv-1',
       usuarioId: 'u-1',
@@ -347,7 +331,7 @@ describe('EventDispatcher', () => {
 
   it('text message with no body (image text fallback): passes empty string', async () => {
     const port = buildFakePort();
-    const deps = buildDeps(port, tmpDir);
+    const deps = buildDeps(port, imageStorage);
     deps.conversacionRepo.findByUsuarioId = vi.fn(async () => ({
       id: 'conv-1',
       usuarioId: 'u-1',

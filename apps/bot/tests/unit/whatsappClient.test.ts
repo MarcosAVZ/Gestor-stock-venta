@@ -23,9 +23,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { Client as WAWebJSClientType, Message as WAWebJSMessageType } from 'whatsapp-web.js';
 import type { Logger as PinoLoggerType } from 'pino';
 
@@ -179,29 +176,21 @@ describe('WhatsAppWebJsAdapter', () => {
   });
 
   describe('downloadMedia()', () => {
-    it('persists the media data buffer to destPath', async () => {
+    it('decodes base64 to Buffer (PR4: ya no escribe a disco)', async () => {
       void fakeClient.emit('ready');
-      const tmpDir = await mkdtemp(join(tmpdir(), 'wa-test-'));
-      try {
-        const destPath = join(tmpDir, 'sub', 'img.jpg');
-        const fakeMsg = makeFakeMessage({
-          hasMedia: true,
-          downloadMedia: async () => ({
-            data: Buffer.from('hello-media').toString('base64'),
-            mimetype: 'image/jpeg',
-            filename: 'img.jpg',
-          }),
-        });
-        const result = await adapter.downloadMedia(
-          fakeMsg as unknown as WAWebJSMessageType,
-          destPath,
-        );
-        expect(result).toBe(destPath);
-        const written = await readFile(destPath);
-        expect(written.toString()).toBe('hello-media');
-      } finally {
-        await rm(tmpDir, { recursive: true, force: true });
-      }
+      const fakeMsg = makeFakeMessage({
+        hasMedia: true,
+        downloadMedia: async () => ({
+          data: Buffer.from('hello-media').toString('base64'),
+          mimetype: 'image/jpeg',
+          filename: 'img.jpg',
+        }),
+      });
+      const result = await adapter.downloadMedia(
+        fakeMsg as unknown as WAWebJSMessageType,
+      );
+      expect(Buffer.isBuffer(result)).toBe(true);
+      expect(result.toString()).toBe('hello-media');
     });
 
     it('throws if msg has no downloadMedia method', async () => {
@@ -210,7 +199,6 @@ describe('WhatsAppWebJsAdapter', () => {
       await expect(
         adapter.downloadMedia(
           badMsg as unknown as WAWebJSMessageType,
-          '/tmp/x.jpg',
         ),
       ).rejects.toThrow(/no downloadMedia method/);
     });

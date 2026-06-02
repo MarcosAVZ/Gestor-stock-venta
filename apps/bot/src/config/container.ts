@@ -45,6 +45,7 @@ import {
   buildEventDispatcher,
   type EventDispatcherHandle,
 } from '../interface/whatsapp/eventDispatcher.ts';
+import { LocalImageStorage } from '../infrastructure/storage/LocalImageStorage.ts';
 
 // ── Tipos públicos ─────────────────────────────────────────────────
 
@@ -155,9 +156,16 @@ export async function buildContainer(opts: ContainerOptions = {}): Promise<AppCo
     : await buildWhatsAppAdapter({ sessionPath: env.SESSION_PATH }, logger);
 
   // 7. Build dispatcher con el port real.
+  // PR4: instanciamos LocalImageStorage acá (composition root) y
+  // lo inyectamos al dispatcher. El path base viene de `IMAGES_PATH`.
+  const imageStorage = new LocalImageStorage({
+    rootPath: env.IMAGES_PATH,
+    logger,
+  });
   const dispatcher = buildEventDispatcher({
     port: whatsappPort,
-    config: { imagesPath: env.IMAGES_PATH },
+    config: {},
+    imageStorage,
     logger,
     rateLimiter,
     conversacionRepo,

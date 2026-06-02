@@ -87,7 +87,7 @@ function buildFakePort(): WhatsAppMessagingPort & { emit: (e: string, ...args: u
     initialize: vi.fn(async () => undefined),
     sendText: vi.fn(async () => undefined),
     sendImage: vi.fn(async () => undefined),
-    downloadMedia: vi.fn(async (_msg, dest) => dest),
+    downloadMedia: vi.fn(async (_msg) => Buffer.from('fake-image-bytes')),
     onIncomingMessage: (handler) => {
       emitter.on('message', (msg: IncomingMessage) => {
         void handler(msg);

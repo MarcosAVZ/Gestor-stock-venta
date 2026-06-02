@@ -7,12 +7,12 @@
  * normaliza a `IncomingMessage` y los entrega al `onIncomingMessage`
  * handler (ver WhatsAppClient.ts). Este módulo conecta ese handler
  * al caso de uso `HandleIncomingMessage` y se encarga del I/O de
- * imágenes (descarga a disco) antes de pasarle el control al use case.
+ * imágenes (descarga + persistencia) antes de pasarle el control al use case.
  *
  * RESPONSABILIDADES:
  *   1. Recibir `IncomingMessage` del adapter.
- *   2. Si es imagen: descargar a `IMAGES_PATH/<phone>/<ts>.jpg`
- *      (path stable: una imagen por segundo por chat).
+ *   2. Si es imagen: descargar el buffer (`port.downloadMedia`) y
+ *      persistirlo vía `imageStorage.save(phone, buffer, ext)`.
  *   3. Llamar a `HandleIncomingMessage` con el input normalizado.
  *   4. Enviar las respuestas de vuelta al chat (text por cada string).
  *   5. Logging estructurado de todo el ciclo (A09 security events).
@@ -21,14 +21,17 @@
  *   - Validación de whitelist (eso es responsabilidad del use case).
  *   - Rate limiting (lo hace el use case).
  *   - Persistencia de Conversacion (lo hace el use case).
+ *   - Persistencia de imágenes (eso es responsabilidad de
+ *     `LocalImageStorage`, inyectado como dep).
+ *
+ * PR4: el port `downloadMedia` ahora retorna `Buffer` (PR3 retornaba
+ * `string` con el path ya escrito). El dispatcher ya no llama a
+ * `buildImagePath` ni `ensureImageDir` — eso se delega al storage.
  *
  * Esto es el "transport adapter" del lado de la aplicación: traduce
  * entre el puerto `WhatsAppMessagingPort` y el caso de uso. El
  * container (task 3.10) es el único que llama `buildEventDispatcher`.
  */
-
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 
 import type { Logger } from 'pino';
 
@@ -43,13 +46,12 @@ import type {
   IncomingMessageHandler,
   WhatsAppMessagingPort,
 } from '../../infrastructure/messaging/WhatsAppClient.ts';
+import type { LocalImageStorage } from '../../infrastructure/storage/LocalImageStorage.ts';
 
 // ── Tipos públicos ─────────────────────────────────────────────────
 
 /** Configuración del dispatcher. */
 export interface EventDispatcherConfig {
-  /** Path base para imágenes (env `IMAGES_PATH`). */
-  imagesPath: string;
   /** Extensión usada para imágenes descargadas. */
   imageExtension?: string;
 }
@@ -57,6 +59,8 @@ export interface EventDispatcherConfig {
 export interface EventDispatcherDeps extends HandleIncomingMessageDeps {
   port: WhatsAppMessagingPort;
   config: EventDispatcherConfig;
+  /** Storage para persistir imágenes (PR4 refactor). */
+  imageStorage: LocalImageStorage;
 }
 
 export type Dispatcher = (msg: IncomingMessage) => Promise<void>;
@@ -79,37 +83,6 @@ export interface EventDispatcherHandle {
 export function extractPhone(from: string): string {
   const at = from.indexOf('@');
   return at >= 0 ? from.slice(0, at) : from;
-}
-
-/**
- * Construye el path destino para una imagen entrante.
- * Formato: `<IMAGES_PATH>/<phone>/<timestamp>.<ext>`
- *
- * Usa timestamp en ms para evitar colisiones dentro del mismo segundo
- * (WhatsApp puede enviar varias fotos en ráfaga).
- */
-export function buildImagePath(
-  imagesPath: string,
-  phone: string,
-  timestamp: Date,
-  ext: string,
-): string {
-  const safePhone = phone.replace(/[^0-9]/g, '');
-  return path.join(imagesPath, safePhone, `${timestamp.getTime()}.${ext}`);
-}
-
-/**
- * Asegura que el directorio destino existe (mkdir -p).
- * Falla silenciosamente a `null` si no se puede crear: el caller decide.
- */
-export async function ensureImageDir(filePath: string): Promise<boolean> {
-  const dir = path.dirname(filePath);
-  try {
-    await fs.mkdir(dir, { recursive: true });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 // ── Factory ────────────────────────────────────────────────────────
@@ -150,21 +123,14 @@ export function buildEventDispatcher(deps: EventDispatcherDeps): EventDispatcher
       'dispatcher: incoming message',
     );
 
-    // 1. Si es imagen, descargar a disco antes de pasar al use case.
+    // 1. Si es imagen, descargar buffer + persistir vía imageStorage.
     let imagePath: string | undefined;
     if (msg.type === 'image' && msg.hasMedia) {
-      const dest = buildImagePath(config.imagesPath, phone, new Date(), ext);
-      const ok = await ensureImageDir(dest);
-      if (!ok) {
-        logger.error({ phone, dest }, 'dispatcher: cannot create image dir');
-        await safeSendText(port, chatId, 'Tuve un problema guardando la foto. Probá de nuevo.');
-        return;
-      }
       try {
-        // `downloadMedia` (port) recibe el `raw` (WAWebJS.Message) y
-        // persiste a `destPath`. El adapter concreto hace el `MessageMedia`
-        // download + writeFile. Devuelve el path final.
-        imagePath = await port.downloadMedia(msg.raw, dest);
+        // PR4: `downloadMedia` solo devuelve bytes; el storage
+        // (inyectado) se encarga del path y la escritura.
+        const buffer = await port.downloadMedia(msg.raw);
+        imagePath = await deps.imageStorage.save(phone, buffer, ext);
         logSecurityEvent(logger, 'media_downloaded', { phone, imagePath });
       } catch (err) {
         logger.error(
