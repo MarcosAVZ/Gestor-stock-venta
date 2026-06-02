@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@compras-whatsapp/shared": ["../../packages/shared/src/index.ts"],
+      "@compras-whatsapp/shared/*": ["../../packages/shared/src/*"],
+      "@compras-whatsapp/db": ["../../packages/db/src/index.ts"],
+      "@compras-whatsapp/db/*": ["../../packages/db/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["node_modules", "dist", "data"]
+}

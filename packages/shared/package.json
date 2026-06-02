@@ -1,0 +1,27 @@
+{
+  "name": "@compras-whatsapp/shared",
+  "version": "0.1.0-mvp",
+  "private": true,
+  "type": "module",
+  "description": "Cross-package utilities: Zod schemas, TypeScript types, AppError hierarchy, conversation state constants, DTOs.",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:coverage": "vitest run --coverage --passWithNoTests",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --max-warnings=0 --no-error-on-unmatched-pattern"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "^2.1.8",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

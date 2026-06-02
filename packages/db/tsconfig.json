@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@compras-whatsapp/shared": ["../shared/src/index.ts"],
+      "@compras-whatsapp/shared/*": ["../shared/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "prisma/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

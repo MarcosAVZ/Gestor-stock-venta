@@ -1,0 +1,12 @@
+# Dependencies
+node_modules
+.pnpm-store
+dist
+build
+coverage
+
+# Local data
+data
+.env
+.env.local
+.env.*.local
