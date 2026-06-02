@@ -86,15 +86,13 @@ async function main(): Promise<void> {
     },
   });
 
-  // eslint-disable-next-line no-console
-  console.log(
+  console.warn(
     `Seed OK: usuario demo=${demo.id} (${demo.telefono}), 2 compras, 1 conversacion.`,
   );
 }
 
 main()
   .catch((err: unknown) => {
-    // eslint-disable-next-line no-console
     console.error('Seed failed:', err);
     process.exitCode = 1;
   })
