@@ -36,9 +36,14 @@ lerna-debug.log*
 Thumbs.db
 
 # Runtime data (volumes mounted in docker)
+# Track only the .gitkeep placeholders so the volume mount dirs exist
+# in the repo. Actual session files, images, and logs are gitignored below.
 data/
-apps/bot/data/session/
-apps/bot/data/images/
+!data/**/.gitkeep
+apps/bot/data/sessions/*
+!apps/bot/data/sessions/.gitkeep
+apps/bot/data/images/*
+!apps/bot/data/images/.gitkeep
 apps/bot/data/*.log
 
 # Test artifacts
