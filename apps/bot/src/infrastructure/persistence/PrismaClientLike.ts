@@ -24,6 +24,7 @@ export type CompraWithItems = {
 export type PrismaClientLike = {
   usuario: {
     findUnique: (args: { where: { telefono: string } | { id: string } }) => Promise<Usuario | null>;
+    findFirst: (args: { select?: unknown; where?: unknown }) => Promise<unknown>;
     create: (args: { data: { telefono: string; nombre?: string } }) => Promise<Usuario>;
   };
   compra: {
