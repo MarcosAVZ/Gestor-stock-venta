@@ -43,6 +43,13 @@ import type { CompraRepository } from '../../domain/repositories/CompraRepositor
 import type { ItemCompraRepository } from '../../domain/repositories/ItemCompraRepository.ts';
 import type { UsuarioRepository } from '../../domain/repositories/UsuarioRepository.ts';
 import { saveCompra, type DatosParaGuardar } from './SaveCompra.ts';
+import {
+  executeQuery,
+  parseQueryCommand,
+  logUnknownCommand,
+  UNKNOWN_COMMAND_MESSAGE,
+  type QueryDeps,
+} from '../queries/index.ts';
 
 // ── Input ───────────────────────────────────────────────────────────
 
@@ -70,6 +77,8 @@ export interface HandleIncomingMessageDeps {
   /** Repos para SaveCompra (PR5 task 5.5). */
   compraRepo: CompraRepository;
   itemCompraRepo: ItemCompraRepository;
+  /** Deps para los 8 query use cases (PR5 task 5.6). */
+  queryDeps: QueryDeps;
   /** Whitelist de phones permitidos (de OWNER_PHONE_NUMBERS). */
   whitelist: ReadonlySet<string>;
   /** Inactivity timeout (ms). Default 15 min. */
@@ -94,7 +103,7 @@ export async function handleIncomingMessage(
   input: IncomingMessageInput,
   deps: HandleIncomingMessageDeps,
 ): Promise<HandleIncomingMessageOutput> {
-  const { logger, rateLimiter, conversacionRepo, usuarioRepo, compraRepo, itemCompraRepo, whitelist } = deps;
+  const { logger, rateLimiter, conversacionRepo, usuarioRepo, queryDeps, whitelist } = deps;
   const now = (deps.clock ?? Date.now)();
   const inactivityMs = deps.inactivityTimeoutMs ?? INACTIVITY_TIMEOUT_MS;
 
@@ -169,28 +178,90 @@ export async function handleIncomingMessage(
     workingDatos = {};
   }
 
-  // ── 5. Map input → ConversationEvent + datosPatch ─────────────
-  // `inputToEvent` retorna el evento Y, si lo hay, un patch de
-  // `datosTemporales` con los valores que llegaron (cantidad, unidad,
-  // precioVenta). El patch se aplica ANTES de la transición para que
-  // el state machine vea los datos en el contexto.
-  const mapping = inputToEvent(input, workingState);
-  if (mapping === null) {
-    // Comando no reconocido como evento de conversación. En PR5 el
-    // command-dispatcher manejará "resumen", "stock", etc. Por ahora
-    // respondemos con un mensaje genérico y dejamos el state en paz.
-    return {
-      responses: [
-        'Por ahora solo proceso imágenes de compras. Pronto vas a tener comandos como "resumen" y "stock".',
-      ],
-      newState: workingState,
-      rejected: false,
-    };
+  // ── 5. Command dispatcher (PR5 task 5.7) ─────────────────────
+  // Si el input es texto y matchea un comando de query (resumen,
+  // stock, etc.), lo ejecutamos y devolvemos el resultado SIN
+  // pasar por el state machine. Esto permite usar queries en
+  // CUALQUIER estado — incluso a mitad de una conversación de
+  // carga. Si no matchea, sigue al state machine.
+  if (input.type === 'text') {
+    const queryCmd = parseQueryCommand(input.body);
+    if (queryCmd !== null) {
+      logger.info(
+        { event: 'query_executed', cmd: queryCmd.type, phone: normalizedPhone },
+        'query dispatched',
+      );
+      const response = await executeQuery(queryCmd, usuarioId, queryDeps);
+      rateLimiter.recordMessage(normalizedPhone, now);
+      return {
+        responses: [response],
+        newState: workingState,
+        rejected: false,
+      };
+    }
+    // Texto libre: si no matchea ningún comando de query Y no es
+    // un evento del state machine, devolvemos el mensaje de ayuda
+    // y loggeamos como security event (OWASP A09).
+    const mapping = inputToEvent(input, workingState);
+    if (mapping === null) {
+      logUnknownCommand(logger, input.body);
+      return {
+        responses: [UNKNOWN_COMMAND_MESSAGE],
+        newState: workingState,
+        rejected: false,
+      };
+    }
+    const { event, datosPatch } = mapping;
+    workingDatos = { ...workingDatos, ...datosPatch };
+    const result = await runStateMachine({
+      input,
+      workingState,
+      workingDatos,
+      usuarioId,
+      event,
+      deps,
+    });
+    rateLimiter.recordMessage(normalizedPhone, now);
+    return result;
   }
-  const { event, datosPatch } = mapping;
-  workingDatos = { ...workingDatos, ...datosPatch };
 
-  // ── 6. State machine ───────────────────────────────────────────
+  // ── 6. Imagen: va directo al state machine ───────────────────
+  const result = await runStateMachine({
+    input,
+    workingState,
+    workingDatos,
+    usuarioId,
+    event: { type: 'IMAGEN_RECIBIDA' },
+    deps,
+  });
+
+  // ── 7. Record rate limit slot AFTER successful processing ──────
+  if (input.type === 'image') {
+    rateLimiter.recordImage(normalizedPhone, now);
+  } else {
+    rateLimiter.recordMessage(normalizedPhone, now);
+  }
+
+  return result;
+}
+
+/**
+ * Ejecuta el state machine + dispatch de acciones (PEDIR_*, GUARDAR, etc.).
+ * Es un helper interno que evita duplicación entre el path de texto
+ * y el path de imagen.
+ */
+async function runStateMachine(params: {
+  input: IncomingMessageInput;
+  workingState: ConversationState;
+  workingDatos: Record<string, unknown>;
+  usuarioId: string;
+  event: ConversationEvent;
+  deps: HandleIncomingMessageDeps;
+}): Promise<HandleIncomingMessageOutput> {
+  const { input, workingState, workingDatos, usuarioId, event, deps } = params;
+  const { logger, conversacionRepo, compraRepo, itemCompraRepo } = deps;
+
+  // ── 7. State machine ───────────────────────────────────────────
   const context = buildContext(workingDatos, event);
   const result: TransitionResult = transition(workingState, event, context);
 
@@ -206,9 +277,7 @@ export async function handleIncomingMessage(
     };
   }
 
-  // ── 7. Persistir si la acción es GUARDAR (PR5 task 5.5) ────────
-  // Llamamos saveCompra ANTES de avanzar de estado, para que el caller
-  // pueda responder "¡Listo, guardé!" solo si la persistencia funcionó.
+  // ── 8. Persistir si la acción es GUARDAR (PR5 task 5.5) ────────
   if (result.accion.tipo === 'GUARDAR') {
     const datosParaGuardar: DatosParaGuardar = workingDatos as unknown as DatosParaGuardar;
     try {
@@ -234,9 +303,6 @@ export async function handleIncomingMessage(
         },
         'fallo al guardar la compra',
       );
-      // Revertimos: NO avanzamos de estado, respondemos con error
-      // voseo. La conversación queda en CONFIRMACION_FINAL para que
-      // el usuario pueda reintentar con "sí".
       return {
         responses: [
           'Ufa, no pude guardar la compra. ¿Probamos de nuevo? Decí "sí" o "cancelar".',
@@ -247,23 +313,16 @@ export async function handleIncomingMessage(
     }
   }
 
-  // ── 8. Render responses desde la Accion ────────────────────────
+  // ── 9. Render responses desde la Accion ────────────────────────
   const responses = renderAccion(result.accion, workingDatos, input);
 
-  // ── 9. Persistir nuevo estado si cambió ────────────────────────
+  // ── 10. Persistir nuevo estado si cambió ───────────────────────
   if (result.siguiente !== workingState) {
     const newDatos = applyAccionToDatos(workingDatos, result.accion, input);
     await conversacionRepo.update(usuarioId, {
       estado: result.siguiente,
       datosTemporales: newDatos,
     });
-  }
-
-  // ── 9. Record rate limit slot AFTER successful processing ──────
-  if (input.type === 'image') {
-    rateLimiter.recordImage(normalizedPhone, now);
-  } else {
-    rateLimiter.recordMessage(normalizedPhone, now);
   }
 
   return {

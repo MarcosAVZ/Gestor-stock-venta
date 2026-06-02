@@ -38,17 +38,14 @@
  * - Inputs no se persisten (son read-only).
  */
 import type { ItemCompra } from '@compras-whatsapp/db';
+import type { Logger } from 'pino';
 
 import { logSecurityEvent } from '../../infrastructure/logging/logger.ts';
 import type { PrismaClientLike } from '../../infrastructure/persistence/PrismaClientLike.ts';
 
 // ── Helpers compartidos ──────────────────────────────────────────────
 
-type AnyLogger = {
-  info: (...args: unknown[]) => void;
-  warn: (...args: unknown[]) => void;
-  error: (...args: unknown[]) => void;
-};
+type AnyLogger = Logger;
 
 /** Mensaje estándar cuando la DB está vacía para el usuario. */
 const EMPTY_DB_MESSAGE = 'Todavía no cargaste compras. Mandame una imagen para empezar.';
@@ -439,7 +436,7 @@ export const UNKNOWN_COMMAND_MESSAGE =
 
 /** Log cuando un comando desconocido llega (OWASP A09). */
 export function logUnknownCommand(logger: AnyLogger, raw: string): void {
-  logSecurityEvent(logger as never, 'state_transition_invalid' as never, {
+  logSecurityEvent(logger, 'state_transition_invalid', {
     context: 'unknown_command',
     raw,
   });

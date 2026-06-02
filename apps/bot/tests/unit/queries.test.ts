@@ -43,9 +43,9 @@ function buildMockLogger() {
 }
 
 function buildMockPrisma(overrides: {
-  compras?: Array<{ id: string; fecha?: Date; items: Array<{ nombre: string; cantidadLote: number; unidad: string; costoLote: Decimal | string; gananciaTotal: Decimal | string; gananciaUnitaria?: Decimal | string; precioVenta?: Decimal | string; costoUnitario?: Decimal | string; updatedAt?: Date }> }>;
-  items?: Array<{ nombre: string; cantidadLote?: number; unidad?: string; gananciaUnitaria: Decimal | string; updatedAt?: Date; costoLote?: Decimal | string; precioVenta?: Decimal | string; costoUnitario?: Decimal | string }>;
-  fuzzy?: Array<{ nombre: string; cantidadLote: number; unidad: string; costoLote: Decimal; gananciaTotal: Decimal; gananciaUnitaria: Decimal; precioVenta: Decimal; costoUnitario: Decimal; updatedAt: Date }>;
+  compras?: Array<{ id?: string; fecha?: Date; items: Array<{ nombre: string; cantidadLote: number; unidad: string; costoLote: Decimal | string; gananciaTotal: Decimal | string; gananciaUnitaria?: Decimal | string; precioVenta?: Decimal | string; costoUnitario?: Decimal | string; updatedAt?: Date }> }>;
+  items?: Array<{ id?: string; nombre: string; cantidadLote?: number; unidad?: string; gananciaUnitaria: Decimal | string; updatedAt?: Date; costoLote?: Decimal | string; precioVenta?: Decimal | string; costoUnitario?: Decimal | string }>;
+  fuzzy?: Array<{ id?: string; compraId?: string; nombre: string; cantidadLote: number; unidad: string; costoLote: Decimal; gananciaTotal: Decimal; gananciaUnitaria: Decimal; precioVenta: Decimal; costoUnitario: Decimal; updatedAt: Date }>;
 } = {}) {
   return {
     compra: {
@@ -177,11 +177,11 @@ describe('queries', () => {
         prisma: buildMockPrisma({
           compras: [
             { id: 'c1', items: [
-              { nombre: 'medias', cantidadLote: 12, unidad: 'PAR' },
-              { nombre: 'cajas', cantidadLote: 5, unidad: 'CAJA' },
+              { nombre: 'medias', cantidadLote: 12, unidad: 'PAR', costoLote: new Decimal(0), gananciaTotal: new Decimal(0) },
+              { nombre: 'cajas', cantidadLote: 5, unidad: 'CAJA', costoLote: new Decimal(0), gananciaTotal: new Decimal(0) },
             ] },
             { id: 'c2', items: [
-              { nombre: 'medias', cantidadLote: 8, unidad: 'PAR' },
+              { nombre: 'medias', cantidadLote: 8, unidad: 'PAR', costoLote: new Decimal(0), gananciaTotal: new Decimal(0) },
             ] },
           ],
         }) as never,

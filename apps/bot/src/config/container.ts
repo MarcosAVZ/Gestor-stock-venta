@@ -170,6 +170,7 @@ export async function buildContainer(opts: ContainerOptions = {}): Promise<AppCo
     usuarioRepo,
     compraRepo,
     itemCompraRepo,
+    queryDeps: { prisma, logger },
     whitelist,
     inactivityTimeoutMs,
   });

@@ -208,6 +208,7 @@ describe('handleIncomingMessage', () => {
       usuarioRepo,
       compraRepo: buildMockCompraRepo(),
       itemCompraRepo: buildMockItemCompraRepo(),
+      queryDeps: { prisma: {} as never, logger },
       whitelist: WHITELIST,
     };
     // Default: usuario ya existe

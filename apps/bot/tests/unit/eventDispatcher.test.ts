@@ -172,7 +172,18 @@ function buildDeps(port: WhatsAppMessagingPort, imageStorage: LocalImageStorage)
     usuarioRepo: buildMockUsuarioRepo('+5491112345678'),
     compraRepo: buildMockCompraRepo(),
     itemCompraRepo: buildMockItemCompraRepo(),
+    queryDeps: { prisma: buildMockPrisma() as never, logger: silentLogger() },
     whitelist: new Set(['+5491112345678']),
+  };
+}
+
+function buildMockPrisma() {
+  return {
+    compra: { findMany: vi.fn(async () => []), create: vi.fn(), findUnique: vi.fn() },
+    itemCompra: { findMany: vi.fn(async () => []), createMany: vi.fn(), findFirst: vi.fn() },
+    $queryRaw: vi.fn(async () => []),
+    usuario: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
+    conversacion: { findUnique: vi.fn(), upsert: vi.fn(), update: vi.fn() },
   };
 }
 
