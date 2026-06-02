@@ -25,7 +25,8 @@ import { join } from 'node:path';
 import type { Message as WAWebJSMessage } from 'whatsapp-web.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from 'pino';
-import { ConversationState, type Conversacion } from '@compras-whatsapp/db';
+import { ConversationState, type Compra, type Conversacion, type ItemCompra, type Unidad } from '@compras-whatsapp/db';
+import { Decimal } from 'decimal.js';
 
 import { buildEventDispatcher, extractPhone } from '../../src/interface/whatsapp/eventDispatcher.ts';
 import type {
@@ -33,6 +34,8 @@ import type {
   WhatsAppMessagingPort,
 } from '../../src/infrastructure/messaging/WhatsAppClient.ts';
 import type { ConversacionRepository } from '../../src/domain/repositories/ConversacionRepository.ts';
+import type { CompraRepository } from '../../src/domain/repositories/CompraRepository.ts';
+import type { ItemCompraRepository } from '../../src/domain/repositories/ItemCompraRepository.ts';
 import type { UsuarioRepository } from '../../src/domain/repositories/UsuarioRepository.ts';
 import type { RateLimiter } from '../../src/infrastructure/messaging/rateLimiter.ts';
 import { LocalImageStorage } from '../../src/infrastructure/storage/LocalImageStorage.ts';
@@ -167,8 +170,55 @@ function buildDeps(port: WhatsAppMessagingPort, imageStorage: LocalImageStorage)
     rateLimiter: buildMockRateLimiter(),
     conversacionRepo: buildMockConversacionRepo(null),
     usuarioRepo: buildMockUsuarioRepo('+5491112345678'),
+    compraRepo: buildMockCompraRepo(),
+    itemCompraRepo: buildMockItemCompraRepo(),
     whitelist: new Set(['+5491112345678']),
   };
+}
+
+function buildMockCompraRepo(): CompraRepository {
+  return {
+    create: vi.fn(async (data) => ({
+      id: 'compra-mock',
+      usuarioId: data.usuarioId,
+      fecha: new Date(),
+      imagenOriginal: data.imagenOriginal ?? null,
+      moneda: 'ARS' as const,
+    } as Compra)),
+    findById: vi.fn(),
+    findByIdWithItems: vi.fn(),
+    findByUsuarioId: vi.fn(),
+    findByDateRange: vi.fn(),
+    findTopByGanancias: vi.fn(),
+  } as unknown as CompraRepository;
+}
+
+function buildMockItemCompraRepo(): ItemCompraRepository {
+  return {
+    createMany: vi.fn(async (items: Array<{
+      compraId: string; nombre: string; cantidadLote: number; unidad: Unidad;
+      costoLote: string; costoUnitario: string; precioVenta: string;
+      gananciaUnitaria: string; gananciaTotal: string;
+    }>) => items.map((it: {
+      compraId: string; nombre: string; cantidadLote: number; unidad: Unidad;
+      costoLote: string; costoUnitario: string; precioVenta: string;
+      gananciaUnitaria: string; gananciaTotal: string;
+    }, i: number) => ({
+      id: `item-mock-${i}`,
+      compraId: it.compraId,
+      nombre: it.nombre,
+      cantidadLote: it.cantidadLote,
+      unidad: it.unidad,
+      costoLote: new Decimal(it.costoLote),
+      costoUnitario: new Decimal(it.costoUnitario),
+      precioVenta: new Decimal(it.precioVenta),
+      gananciaUnitaria: new Decimal(it.gananciaUnitaria),
+      gananciaTotal: new Decimal(it.gananciaTotal),
+      updatedAt: new Date(),
+    } as unknown as ItemCompra))),
+    findByNombre: vi.fn(),
+    findRecentByNombre: vi.fn(),
+  } as unknown as ItemCompraRepository;
 }
 
 function buildIncoming(overrides: Partial<IncomingMessage> = {}): IncomingMessage {

@@ -39,7 +39,10 @@ import {
 import { UnauthorizedError, RateLimitError } from '../../domain/errors/OperationalError.ts';
 import type { RateLimiter } from '../../infrastructure/messaging/rateLimiter.ts';
 import type { ConversacionRepository } from '../../domain/repositories/ConversacionRepository.ts';
+import type { CompraRepository } from '../../domain/repositories/CompraRepository.ts';
+import type { ItemCompraRepository } from '../../domain/repositories/ItemCompraRepository.ts';
 import type { UsuarioRepository } from '../../domain/repositories/UsuarioRepository.ts';
+import { saveCompra, type DatosParaGuardar } from './SaveCompra.ts';
 
 // ── Input ───────────────────────────────────────────────────────────
 
@@ -64,6 +67,9 @@ export interface HandleIncomingMessageDeps {
   rateLimiter: RateLimiter;
   conversacionRepo: ConversacionRepository;
   usuarioRepo: UsuarioRepository;
+  /** Repos para SaveCompra (PR5 task 5.5). */
+  compraRepo: CompraRepository;
+  itemCompraRepo: ItemCompraRepository;
   /** Whitelist de phones permitidos (de OWNER_PHONE_NUMBERS). */
   whitelist: ReadonlySet<string>;
   /** Inactivity timeout (ms). Default 15 min. */
@@ -88,7 +94,7 @@ export async function handleIncomingMessage(
   input: IncomingMessageInput,
   deps: HandleIncomingMessageDeps,
 ): Promise<HandleIncomingMessageOutput> {
-  const { logger, rateLimiter, conversacionRepo, usuarioRepo, whitelist } = deps;
+  const { logger, rateLimiter, conversacionRepo, usuarioRepo, compraRepo, itemCompraRepo, whitelist } = deps;
   const now = (deps.clock ?? Date.now)();
   const inactivityMs = deps.inactivityTimeoutMs ?? INACTIVITY_TIMEOUT_MS;
 
@@ -163,9 +169,13 @@ export async function handleIncomingMessage(
     workingDatos = {};
   }
 
-  // ── 5. Map input → ConversationEvent ───────────────────────────
-  const event = inputToEvent(input, workingState);
-  if (event === null) {
+  // ── 5. Map input → ConversationEvent + datosPatch ─────────────
+  // `inputToEvent` retorna el evento Y, si lo hay, un patch de
+  // `datosTemporales` con los valores que llegaron (cantidad, unidad,
+  // precioVenta). El patch se aplica ANTES de la transición para que
+  // el state machine vea los datos en el contexto.
+  const mapping = inputToEvent(input, workingState);
+  if (mapping === null) {
     // Comando no reconocido como evento de conversación. En PR5 el
     // command-dispatcher manejará "resumen", "stock", etc. Por ahora
     // respondemos con un mensaje genérico y dejamos el state en paz.
@@ -177,6 +187,8 @@ export async function handleIncomingMessage(
       rejected: false,
     };
   }
+  const { event, datosPatch } = mapping;
+  workingDatos = { ...workingDatos, ...datosPatch };
 
   // ── 6. State machine ───────────────────────────────────────────
   const context = buildContext(workingDatos, event);
@@ -194,10 +206,51 @@ export async function handleIncomingMessage(
     };
   }
 
-  // ── 7. Render responses desde la Accion ────────────────────────
+  // ── 7. Persistir si la acción es GUARDAR (PR5 task 5.5) ────────
+  // Llamamos saveCompra ANTES de avanzar de estado, para que el caller
+  // pueda responder "¡Listo, guardé!" solo si la persistencia funcionó.
+  if (result.accion.tipo === 'GUARDAR') {
+    const datosParaGuardar: DatosParaGuardar = workingDatos as unknown as DatosParaGuardar;
+    try {
+      const guardado = await saveCompra(
+        { usuarioId, datos: datosParaGuardar },
+        { compraRepo, itemCompraRepo },
+      );
+      logger.info(
+        {
+          event: 'compra_guardada',
+          compraId: guardado.compraId,
+          costoUnitario: guardado.metricas.costoUnitario,
+          gananciaUnitaria: guardado.metricas.gananciaUnitaria,
+        },
+        'compra persistida por state machine',
+      );
+    } catch (err) {
+      logger.error(
+        {
+          event: 'compra_save_failed',
+          err: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        },
+        'fallo al guardar la compra',
+      );
+      // Revertimos: NO avanzamos de estado, respondemos con error
+      // voseo. La conversación queda en CONFIRMACION_FINAL para que
+      // el usuario pueda reintentar con "sí".
+      return {
+        responses: [
+          'Ufa, no pude guardar la compra. ¿Probamos de nuevo? Decí "sí" o "cancelar".',
+        ],
+        newState: workingState,
+        rejected: true,
+      };
+    }
+  }
+
+  // ── 8. Render responses desde la Accion ────────────────────────
   const responses = renderAccion(result.accion, workingDatos, input);
 
-  // ── 8. Persistir nuevo estado si cambió ────────────────────────
+  // ── 9. Persistir nuevo estado si cambió ────────────────────────
   if (result.siguiente !== workingState) {
     const newDatos = applyAccionToDatos(workingDatos, result.accion, input);
     await conversacionRepo.update(usuarioId, {
@@ -226,21 +279,27 @@ export async function handleIncomingMessage(
  * Mapea el input del bot a un ConversationEvent. Si el input no
  * encaja en ningún evento del state machine (ej: un comando de query
  * en PR5), retorna `null` y el caller responde genérico.
+ *
+ * Retorna además un `datosPatch` con los valores ingresados por el
+ * usuario (cantidad, unidad, precioVenta, costoLote manual) que el
+ * orquestador aplica a `datosTemporales` ANTES de la transición. Esto
+ * permite que el state machine + GUARDAR tengan los datos persistidos
+ * cuando llegue el momento de saveCompra (PR5 task 5.5).
  */
 function inputToEvent(
   input: IncomingMessageInput,
   state: ConversationState,
-): ConversationEvent | null {
+): { event: ConversationEvent; datosPatch: Record<string, unknown> } | null {
   if (input.type === 'image') {
-    return { type: 'IMAGEN_RECIBIDA' };
+    return { event: { type: 'IMAGEN_RECIBIDA' }, datosPatch: {} };
   }
 
   const text = input.body.trim();
   const lower = text.toLowerCase();
 
   // Comandos globales disponibles desde cualquier estado.
-  if (lower === 'cancelar' || lower === 'cancel') return { type: 'CANCELAR' };
-  if (lower === 'menu' || lower === 'menú' || lower === 'empezar') return { type: 'MENU' };
+  if (lower === 'cancelar' || lower === 'cancel') return { event: { type: 'CANCELAR' }, datosPatch: {} };
+  if (lower === 'menu' || lower === 'menú' || lower === 'empezar') return { event: { type: 'MENU' }, datosPatch: {} };
 
   // En ESPERANDO_IMAGEN, texto no es nada procesable por ahora
   // (los comandos de query llegan en PR5). Respondemos con null y
@@ -253,30 +312,48 @@ function inputToEvent(
   // "si/sí/s/yes/y/ok/dale/1" → "si" y "no/n/mal/incorrecto/2" → "no").
   const siNo = opcionSiNoSchema.safeParse(lower);
   if (siNo.success) {
-    return siNo.data === 'si' ? { type: 'USUARIO_CONFIRMA' } : { type: 'USUARIO_RECHAZA' };
+    return {
+      event: siNo.data === 'si' ? { type: 'USUARIO_CONFIRMA' } : { type: 'USUARIO_RECHAZA' },
+      datosPatch: {},
+    };
   }
   if (lower === 'corregir' || lower.startsWith('cambiar ')) {
     const campo = lower.startsWith('cambiar ') ? text.slice(8) : 'general';
-    return { type: 'USUARIO_CORRIGE', campo };
+    return { event: { type: 'USUARIO_CORRIGE', campo }, datosPatch: {} };
   }
 
   // NUMERIC INPUTS (PR5: usa los schemas Zod de shared).
   if (state === ConversationState.PREGUNTANDO_CANTIDAD) {
     const parsed = cantidadSchema.safeParse(Number(text));
-    if (parsed.success) return { type: 'CANTIDAD_RECIBIDA', valor: parsed.data };
+    if (parsed.success) {
+      return {
+        event: { type: 'CANTIDAD_RECIBIDA', valor: parsed.data },
+        datosPatch: { cantidadIngresada: parsed.data },
+      };
+    }
   }
   if (state === ConversationState.PREGUNTANDO_PRECIO_VENTA) {
     // `precioSchema` acepta string ARS con prefijos/separadores, lo
     // que evita que el usuario tenga que tipear `1234.5` o `1234,5`
     // a mano — aceptamos `$1.500`, `AR$ 1.500,00`, etc.
     const parsed = precioSchema.safeParse(text);
-    if (parsed.success) return { type: 'PRECIO_RECIBIDO', valor: parsed.data };
+    if (parsed.success) {
+      return {
+        event: { type: 'PRECIO_RECIBIDO', valor: parsed.data },
+        datosPatch: { precioVenta: parsed.data },
+      };
+    }
   }
 
   // UNIDAD (PR5: usa el schema Zod `opcionUnidadSchema`).
   if (state === ConversationState.PREGUNTANDO_UNIDAD) {
     const parsed = opcionUnidadSchema.safeParse(lower);
-    if (parsed.success) return { type: 'UNIDAD_RECIBIDA', valor: parsed.data };
+    if (parsed.success) {
+      return {
+        event: { type: 'UNIDAD_RECIBIDA', valor: parsed.data },
+        datosPatch: { unidadIngresada: parsed.data },
+      };
+    }
   }
 
   return null;
