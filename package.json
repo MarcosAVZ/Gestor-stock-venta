@@ -1,0 +1,31 @@
+{
+  "name": "@compras-whatsapp/root",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Monorepo root for Sistema de Gestión de Compras WhatsApp - MVP bot (low cost, no paid services).",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22.6.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --workspace-concurrency=4 build",
+    "test": "pnpm -r --workspace-concurrency=4 test",
+    "test:coverage": "pnpm -r --workspace-concurrency=4 test --coverage",
+    "lint": "pnpm -r --workspace-concurrency=4 lint",
+    "typecheck": "pnpm -r --workspace-concurrency=4 typecheck",
+    "dev": "pnpm --filter @compras-whatsapp/bot dev",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "eslint": "^9.17.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

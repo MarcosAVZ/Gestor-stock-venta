@@ -1,0 +1,10 @@
+node_modules/
+dist/
+build/
+coverage/
+pnpm-lock.yaml
+*.min.js
+*.min.css
+data/
+.env
+.env.local

@@ -1,0 +1,16 @@
+{
+  "name": "@compras-whatsapp/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "React dashboard (Fase 2). Stub vacío en este PR; se llenará con Vite + React + Tailwind + shadcn/ui.",
+  "scripts": {
+    "build": "echo 'apps/web: stub - no build in PR1' && exit 0",
+    "typecheck": "echo 'apps/web: stub - no source in PR1' && exit 0",
+    "test": "vitest run --passWithNoTests",
+    "lint": "echo 'apps/web: stub - no source in PR1' && exit 0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}
