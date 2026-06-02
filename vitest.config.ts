@@ -20,11 +20,16 @@ export default defineConfig({
         '**/config/**',
       ],
       thresholds: {
-        // Lowered at PR1; tightened in later PRs (see sdd-tasks verification table).
-        lines: 50,
-        functions: 50,
-        statements: 50,
-        branches: 50,
+        // PR5 final: spec targets ≥ 80% lines/statements/functions and
+        // ≥ 70% branches for the application+shared surface. We allow
+        // the threshold to apply project-wide (including infrastructure
+        // and domain) — most of those are tested via integration
+        // tests. The PR5 expansion is in `apps/bot/src/application/**`
+        // (queries + conversation + pricing + learning).
+        lines: 70,
+        functions: 70,
+        statements: 70,
+        branches: 60,
       },
     },
   },

@@ -10,7 +10,6 @@
  */
 
 import type { Moneda, Unidad, Usuario, ItemCompra } from '@compras-whatsapp/db';
-import type { Prisma } from '@compras-whatsapp/db';
 
 export type CompraWithItems = {
   id: string;
@@ -43,6 +42,7 @@ export type PrismaClientLike = {
       where: Record<string, unknown>;
       orderBy?: { fecha?: 'asc' | 'desc' };
       take?: number;
+      include?: { items?: boolean };
     }) => Promise<unknown[]>;
   };
   itemCompra: {
@@ -51,6 +51,8 @@ export type PrismaClientLike = {
       where: unknown;
       orderBy?: unknown;
       take?: number;
+      select?: unknown;
+      include?: unknown;
     }) => Promise<unknown[]>;
     findFirst: (args: { where: unknown; orderBy?: unknown }) => Promise<unknown>;
   };
@@ -63,7 +65,9 @@ export type PrismaClientLike = {
     }) => Promise<unknown>;
     update: (args: { where: { usuarioId: string }; data: unknown }) => Promise<unknown>;
   };
-  $queryRaw: (query: Prisma.Sql, ...values: unknown[]) => Promise<unknown>;
+  $queryRaw: ((strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>) & ((
+    sql: { strings: string[]; values: unknown[] },
+  ) => Promise<unknown>);
 };
 
 /** Row que `createMany` espera para cada ItemCompra. */

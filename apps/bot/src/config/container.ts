@@ -127,8 +127,6 @@ export async function buildContainer(opts: ContainerOptions = {}): Promise<AppCo
   // Lo instanciamos acá para que el wiring esté cerrado, aunque
   // HandleIncomingMessage no lo consuma todavía.
   const itemCompraRepo = new PrismaItemCompraRepository(prisma);
-  void compraRepo;
-  void itemCompraRepo;
 
   // 3. RateLimiter
   const rateLimiter = new RateLimiter({
@@ -170,6 +168,9 @@ export async function buildContainer(opts: ContainerOptions = {}): Promise<AppCo
     rateLimiter,
     conversacionRepo,
     usuarioRepo,
+    compraRepo,
+    itemCompraRepo,
+    queryDeps: { prisma, logger },
     whitelist,
     inactivityTimeoutMs,
   });

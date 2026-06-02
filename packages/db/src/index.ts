@@ -29,12 +29,11 @@ export type {
 // disponibles implícitamente al importarlo.
 export { Prisma } from '@prisma/client';
 
-// Enums (Prisma los emite como const objects en runtime, pero los
-// re-exportamos como type + value para que el código de aplicación
-// pueda hacer `Unidad.PAR` y `function foo(u: Unidad) {...}` sin
-// doble import).
-export {
-  Unidad,
-  Moneda,
-  ConversationState,
-} from '@prisma/client';
+// Enums: la fuente única de verdad es `@compras-whatsapp/shared`
+// (PR5). Prisma los genera con los mismos valores desde el schema
+// (sincronización manual — ver `shared/src/enums/`). Re-exportamos
+// desde shared para mantener compatibilidad con el código que ya
+// hacía `import { Unidad } from '@compras-whatsapp/db'`.
+export { Unidad, Moneda, ConversationState } from '@compras-whatsapp/shared';
+// Re-exportar los tipos también (TS borra el import type en strip).
+export type { Unidad as UnidadType, Moneda as MonedaType } from '@compras-whatsapp/shared';
