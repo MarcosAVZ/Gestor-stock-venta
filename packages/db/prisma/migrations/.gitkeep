@@ -1,0 +1,10 @@
+// Las migraciones de Prisma se generan con `pnpm prisma:migrate` y se
+// commitean en este directorio. Mantenemos el directorio trackeado en git
+// aunque esté vacío (Prisma genera el contenido cuando se corre la primera
+// migración contra una DB real).
+//
+// Estado en PR2: Docker no instalado en el host, por lo que NO se pudo
+// generar la migración inicial. La validación de schema se hizo con
+// `prisma format` y `prisma generate`. La primera migración real se
+// generará en PR6 (validación final con Docker disponible) o cuando se
+// ejecute `prisma migrate dev` por primera vez.

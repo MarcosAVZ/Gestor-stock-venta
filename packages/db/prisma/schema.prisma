@@ -1,0 +1,110 @@
+// Prisma schema — Sistema de Gestión de Compras WhatsApp
+//
+// PR2 scope: define los 4 modelos del MVP (Usuario, Compra, ItemCompra,
+// Conversacion), enums, índices, relaciones con onDelete: Cascade, y la
+// configuración necesaria para habilitar la extensión pg_trgm de Postgres
+// (requerida por el fuzzy match de la función de aprendizaje — req-product-learning).
+//
+// Decisiones locked (ver sdd/add-mvp-skeleton-and-bot-flow/design obs#28, sección 3):
+// - Cuid en vez de UUID v4
+// - Decimal(12,2) para precios, Decimal(12,4) para unitarios
+// - datosTemporales como Json (flexibilidad para 7 estados)
+// - updatedAt en ItemCompra (desempate fuzzy match)
+// - Sin proveedor en Compra (decisión del design)
+//
+// Naming del design (`telefono`, `cantidadLote`, `costoLote`, `costoUnitario`)
+// diverge del spec original (`phone`, `cantidad`, `costoUnitario`) por claridad.
+// Documentado en apply-progress.
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pg_trgm]
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+// ── Enums ────────────────────────────────────────────────────────────
+
+enum Unidad {
+  UNIDAD
+  PAR
+  PACK
+  CAJA
+  OTRO
+}
+
+enum Moneda {
+  ARS
+  USD
+}
+
+enum ConversationState {
+  ESPERANDO_IMAGEN
+  VALIDANDO_DATOS
+  PREGUNTANDO_CANTIDAD
+  PREGUNTANDO_UNIDAD
+  PREGUNTANDO_PRECIO_VENTA
+  CONFIRMACION_FINAL
+  GUARDADO
+}
+
+// ── Modelos ──────────────────────────────────────────────────────────
+
+model Usuario {
+  id           String        @id @default(cuid())
+  telefono     String        @unique // formato E.164: +5491112345678
+  nombre       String?
+  createdAt    DateTime      @default(now())
+  compras      Compra[]
+  conversacion Conversacion?
+
+  @@index([telefono])
+}
+
+model Compra {
+  id             String       @id @default(cuid())
+  usuarioId      String
+  fecha          DateTime     @default(now())
+  imagenOriginal String? // path local: data/images/{año}/{mes}/{uuid}.{ext}
+  moneda         Moneda       @default(ARS)
+  items          ItemCompra[]
+  usuario        Usuario      @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId, fecha])
+  @@index([fecha])
+}
+
+model ItemCompra {
+  id               String   @id @default(cuid())
+  compraId         String
+  nombre           String // nombre normalizado (lowercase, trim)
+  cantidadLote     Int // ej: 12 pares
+  unidad           Unidad
+  costoLote        Decimal  @db.Decimal(12, 2) // costo total del lote
+  costoUnitario    Decimal  @db.Decimal(12, 4) // costoLote / cantidadLote
+  precioVenta      Decimal  @db.Decimal(12, 2) // precio venta por unidad
+  gananciaUnitaria Decimal  @db.Decimal(12, 4) // precioVenta - costoUnitario
+  gananciaTotal    Decimal  @db.Decimal(12, 2) // gananciaUnitaria * cantidadLote
+  updatedAt        DateTime @updatedAt
+  compra           Compra   @relation(fields: [compraId], references: [id], onDelete: Cascade)
+
+  @@index([nombre])
+  @@index([compraId])
+  @@index([gananciaUnitaria])
+}
+
+model Conversacion {
+  id              String            @id @default(cuid())
+  usuarioId       String            @unique
+  estado          ConversationState @default(ESPERANDO_IMAGEN)
+  datosTemporales Json              @default("{}")
+  updatedAt       DateTime          @updatedAt
+  createdAt       DateTime          @default(now())
+  usuario         Usuario           @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([estado])
+}
