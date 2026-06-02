@@ -110,7 +110,9 @@ export function logSecurityEvent(
     | 'whatsapp_session_restored'
     | 'whatsapp_qr_ready'
     | 'unhandled_rejection'
-    | 'uncaught_exception',
+    | 'uncaught_exception'
+    | 'media_downloaded'
+    | 'send_failed',
   metadata: Record<string, unknown> = {},
 ): void {
   // level warn para la mayoría; error para unhandled_rejection/uncaught_exception.
