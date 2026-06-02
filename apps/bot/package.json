@@ -11,15 +11,29 @@
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest --passWithNoTests",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --max-warnings=0 --no-error-on-unmatched-pattern",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "start": "node --experimental-strip-types --no-warnings src/index.ts"
   },
   "dependencies": {
+    "@compras-whatsapp/db": "workspace:*",
     "@compras-whatsapp/shared": "workspace:*",
-    "@compras-whatsapp/db": "workspace:*"
+    "decimal.js": "10.4.3",
+    "dotenv": "16.4.7",
+    "express": "4.21.2",
+    "fuse.js": "7.0.0",
+    "helmet": "8.0.0",
+    "p-queue": "8.0.1",
+    "pino": "9.5.0",
+    "pino-pretty": "13.0.0",
+    "whatsapp-web.js": "1.27.0",
+    "zod": "3.24.1"
   },
   "devDependencies": {
+    "@types/express": "4.17.21",
     "@types/node": "^22.10.0",
+    "@types/supertest": "6.0.2",
     "eslint": "^9.17.0",
+    "supertest": "7.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
