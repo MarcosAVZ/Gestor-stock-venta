@@ -11,6 +11,7 @@
  *   - PAR    ↔ "par", "pares"
  *   - PACK   ↔ "pack", "packs"
  *   - CAJA   ↔ "caja", "cajas"
+ *   - LOTE   ↔ "lote", "lotes"
  *   - OTRO   ↔ "otro", "otra"
  *
  * Si el input no matchea, el schema retorna `null` con mensaje
@@ -30,6 +31,8 @@ const NORMALIZACIONES: Record<string, Unidad> = {
   packs: Unidad.PACK,
   caja: Unidad.CAJA,
   cajas: Unidad.CAJA,
+  lote: Unidad.LOTE,
+  lotes: Unidad.LOTE,
   otro: Unidad.OTRO,
   otra: Unidad.OTRO,
 };

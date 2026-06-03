@@ -14,7 +14,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { Unidad, UnidadSchema } from '@compras-whatsapp/shared';
+import { Unidad, UnidadSchema, opcionUnidadSchema } from '@compras-whatsapp/shared';
 
 describe('Unidad const object', () => {
   it('expone los 6 valores canónicos', () => {
@@ -60,5 +60,29 @@ describe('UnidadSchema (Zod)', () => {
     expect(UnidadSchema.safeParse('docena').success).toBe(false);
     expect(UnidadSchema.safeParse('').success).toBe(false);
     expect(UnidadSchema.safeParse('lote').success).toBe(false); // lowercase NO es válido; solo 'LOTE' mayúscula
+  });
+});
+
+describe('opcionUnidadSchema (palabras clave del usuario)', () => {
+  it('normaliza "lote" a LOTE (keyword nuevo en WU1)', () => {
+    expect(opcionUnidadSchema.parse('lote')).toBe('LOTE');
+  });
+
+  it('normaliza "lotes" a LOTE (keyword nuevo en WU1)', () => {
+    expect(opcionUnidadSchema.parse('lotes')).toBe('LOTE');
+  });
+
+  it('tolera mayúsculas y espacios en "lote" / "lotes"', () => {
+    expect(opcionUnidadSchema.parse('LOTE')).toBe('LOTE');
+    expect(opcionUnidadSchema.parse('Lotes')).toBe('LOTE');
+    expect(opcionUnidadSchema.parse('  lote  ')).toBe('LOTE');
+  });
+
+  it('preserva backward-compat: las 5 palabras clave previas siguen funcionando', () => {
+    expect(opcionUnidadSchema.parse('unidad')).toBe('UNIDAD');
+    expect(opcionUnidadSchema.parse('par')).toBe('PAR');
+    expect(opcionUnidadSchema.parse('pack')).toBe('PACK');
+    expect(opcionUnidadSchema.parse('caja')).toBe('CAJA');
+    expect(opcionUnidadSchema.parse('otro')).toBe('OTRO');
   });
 });
