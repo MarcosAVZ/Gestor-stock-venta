@@ -566,17 +566,236 @@ function detectAnyLabel(lines: string[]): boolean {
 }
 
 /**
- * Pass 2 (label-aware aggregator) — STUB en T3.3.
- *
- * Se implementa en T3.4 (la siguiente task). Por ahora devuelve
- * `[]` para que el dispatch de `parseOCRText` esté wired pero el
- * label-aware path todavía no haga nada — así los tests de
- * receipt-shape (legacy fallback) siguen pasando byte-for-byte
- * aunque el Temu test siga RED (esperado: el stub ignora los
- * labels del Temu).
+ * Pass 2 (label-aware aggregator) — IMPLEMENTADO en T3.4.
+ * La implementación completa está más abajo en este archivo.
  */
-function parseLinesLabelAware(_lines: string[]): OCRProduct[] {
-  return [];
+
+// ─────────────────────────────────────────────────────────────────────
+// WU3 · T3.4 — Lot-multiplier heuristic + aggregator implementation.
+//
+// DEVATION FROM DESIGN §5 (documentada en apply-progress):
+// El design dice que un `UNKNOWN` se routea SOLO through legacy row
+// processing y no actualiza `pendingName`. Para que el Temu test
+// pase (la línea `2 pares de calcetines` debe usarse como nombre
+// del producto), el aggregator tiene que tratar las líneas
+// UNKNOWN que NO emiten un producto via `parseLinesLegacy` como
+// candidatas a `pendingName` (después de `legacyCleanName`). Esto
+// es una extensión mínima que preserva el comportamiento del
+// design en el caso UNKNOWN-con-producto, y agrega el caso
+// UNKNOWN-sin-producto-como-name-candidate.
+//
+// Decisión alineada con el orchestrator T3.4 spec: el Temu test es
+// el done criteria mandatorio; el "use as name candidate" es la
+// interpretación más natural de "UNKNOWN line que no es self-contained
+// product".
+// ─────────────────────────────────────────────────────────────────────
+
+/** Lot-multiplier word regex (case-insensitive). Matchea las palabras
+ *  singulares: `pack`, `lote`, `set`, `juego`, `combo`. Los plurales
+ *  (`packs`, `lotes`, ...) se matchean por la regex numérica
+ *  (`\d+\s+(pares|unidades|packs|cajas?)\b`).
+ *
+ *  Fuente: orchestrator T3.4 spec literal. */
+const LOT_MULTIPLIER_WORDS_REGEX = /\b(pack|lote|set|juego|combo)\b/i;
+
+/** Regex numérica para lot-multiplier: un dígito + unidad de venta
+ *  con plural opcional. Matchea `2 pares`, `10 unidades`, `3 packs`,
+ *  `1 caja`, etc. */
+const LOT_MULTIPLIER_NUMERIC_REGEX =
+  /\b\d+\s+(pares?|unidades?|packs?|cajas?)\b/i;
+
+/**
+ * Heurística lot-multiplier (design §5, propuesta del orchestrator
+ * T3.4): si el nombre contiene una lot-multiplier word o una frase
+ * `digit + (pares|unidades|packs|cajas)`, devuelve `LOTE`. Si no,
+ * `UNIDAD`.
+ *
+ * Se usa en el aggregator cuando el quantity es bare (e.g., `x1`)
+ * y la unidad no fue determinada por el `Cantidad: N unidades` —
+ * en esos casos, el título del producto implica si es un pack o
+ * una unidad individual.
+ */
+export function defaultUnitForName(name: string): Unidad {
+  if (LOT_MULTIPLIER_WORDS_REGEX.test(name)) return 'LOTE';
+  if (LOT_MULTIPLIER_NUMERIC_REGEX.test(name)) return 'LOTE';
+  return 'UNIDAD';
+}
+
+/**
+ * Pass 2 — label-aware aggregator (design §5).
+ *
+ * Consume `lines` (ya spliteadas por `parseOCRText`), las clasifica
+ * con `classifyLine`, y produce `OCRProduct[]` consumiendo los
+ * `ClassifiedLine` en document order.
+ *
+ * Estado del walk:
+ * - `pendingName`: candidato a nombre del próximo PRICE_CURRENT.
+ * - `pendingQty`: {cantidad, unidad} del próximo PRICE_CURRENT.
+ *
+ * Por cada línea clasificada:
+ * - `NOISE` → ignore. No toca pendingName.
+ * - `LOTE_CONTENT` → recognized, ignored (reserved for future).
+ * - `NAME_CANDIDATE` → pendingName = legacyCleanName(value).
+ * - `QUANTITY` → pendingQty = value.
+ * - `PRICE_CURRENT` → emitir un producto. nombre = pendingName ??
+ *   legacyCleanName(raw - price). Si pendingQty está set, se usa;
+ *   si no, cantidad=1 y unidad=defaultUnitForName(nombre).
+ * - `PRICE_OLD` → no emite. Si AL FINAL del walk no emitimos
+ *   NINGÚN producto con PRICE_CURRENT pero SÍ vimos PRICE_OLD,
+ *   caemos al legacy aggregator sobre todo el documento (safety
+ *   net del design §10 E14 + comportamiento defensivo).
+ * - `UNKNOWN` → llamar `parseLinesLegacy([line])`. Si emite
+ *   productos, se agregan al resultado. Si NO emite, la línea se
+ *   trata como candidata a `pendingName` (deviation del design
+ *   documentada arriba — necesaria para que el Temu test pase).
+ *
+ * Cap de `MAX_PRODUCTOS` (10) se respeta en ambos paths.
+ *
+ * Inline `Antes: $X / Ahora: $Y`: actualmente NO se maneja en
+ * `classifyLine` (devolvemos `UNKNOWN` para esa línea). El aggregator
+ * lo routea por la rama UNKNOWN → `parseLinesLegacy` lo procesa.
+ * Esta es la decisión de implementación de T3.4 (la otra opción
+ * era pre-procesar en `parseLinesLabelAware` para split-ear la
+ * línea en dos sintéticos antes de clasificar; T3.6 confirma la
+ * decisión y agrega el test específico).
+ */
+function parseLinesLabelAware(lines: string[]): OCRProduct[] {
+  const productos: OCRProduct[] = [];
+  let pendingName: string | null = null;
+  /** Raw version del pendingName, preservado para `defaultUnitForName`.
+   *  El cleaning de `legacyCleanName` elimina números y unit-words
+   *  (justamente las señales lot-multiplier), por eso la heurística
+   *  DEBE aplicarse al RAW, no al cleaned. */
+  let pendingNameRaw: string | null = null;
+  let pendingQty: { cantidad: number; unidad: Unidad } | null = null;
+  let sawPriceOld = false;
+  let sawPriceCurrent = false;
+
+  for (const line of lines) {
+    if (productos.length >= MAX_PRODUCTOS) break;
+    const classified = classifyLine(line);
+
+    switch (classified.label) {
+      case 'NOISE':
+        // Skip the line entirely. Do NOT update pendingName.
+        break;
+
+      case 'LOTE_CONTENT':
+        // Recognized, ignored in v0. Future: decompose loteContenido.
+        break;
+
+      case 'NAME_CANDIDATE': {
+        const raw = classified.value as string;
+        const candidate = legacyCleanName(raw);
+        if (candidate.length > 0) {
+          pendingName = candidate;
+          pendingNameRaw = raw;
+        }
+        break;
+      }
+
+      case 'QUANTITY':
+        pendingQty = classified.value as { cantidad: number; unidad: Unidad };
+        break;
+
+      case 'PRICE_OLD':
+        sawPriceOld = true;
+        // Do NOT emit. PRICE_OLD alone is never the answer.
+        break;
+
+      case 'PRICE_CURRENT': {
+        sawPriceCurrent = true;
+        const value = classified.value as number;
+
+        // Nombre: pendingName o limpiar la línea actual sin el precio.
+        let name = pendingName;
+        let nameRaw = pendingNameRaw;
+        if (name === null) {
+          const prices = legacyExtractPricesFromLine(classified.raw);
+          let nameSource = classified.raw;
+          for (let k = prices.length - 1; k >= 0; k -= 1) {
+            const p = prices[k]!;
+            nameSource =
+              nameSource.slice(0, p.index) + nameSource.slice(p.index + p.length);
+          }
+          const cleaned = legacyCleanName(nameSource);
+          if (cleaned.length > 0) {
+            name = cleaned;
+            nameRaw = nameSource; // RAW post-price-strip para la heurística.
+          }
+        }
+
+        if (name === null) {
+          // No hay nombre: descartar.
+          pendingName = null;
+          pendingNameRaw = null;
+          pendingQty = null;
+          break;
+        }
+
+        const cantidad = pendingQty?.cantidad ?? 1;
+        const unidad =
+          pendingQty?.unidad ?? defaultUnitForName(nameRaw ?? name);
+
+        productos.push({
+          nombre: name,
+          precio: value,
+          cantidad,
+          unidad,
+          confianza: 0.7,
+        });
+        pendingName = null;
+        pendingNameRaw = null;
+        pendingQty = null;
+        break;
+      }
+
+      case 'UNKNOWN': {
+        // Ruta la línea a través del legacy row processor.
+        const emitted = parseLinesLegacy([classified.raw]);
+
+        // Filtro de phantom products: el legacy es agresivo al
+        // interpretar el primer token numérico como precio. En el
+        // contexto label-aware, una línea como `2 pares de
+        // calcetines` produce precio=2 + cantidad=2 (phantom) — el
+        // "precio" es realmente un count. Descartamos productos
+        // donde precio === cantidad (el legacy nunca emitiría un
+        // producto real con esa propiedad: precio >> cantidad en
+        // receipt shape legítimo).
+        const real = emitted.filter((p) => p.precio !== p.cantidad);
+        if (real.length > 0) {
+          for (const p of real) {
+            if (productos.length >= MAX_PRODUCTOS) break;
+            productos.push(p);
+          }
+        } else {
+          // DEVIATION FROM DESIGN: la línea no produjo un producto
+          // real vía legacy (o solo produjo phantoms). La tratamos
+          // como candidata a `pendingName` para que el próximo
+          // PRICE_CURRENT pueda usarla como nombre. Esto es
+          // necesario para el Temu case (`2 pares de calcetines`).
+          const cleaned = legacyCleanName(classified.raw);
+          if (cleaned.length > 0) {
+            pendingName = cleaned;
+            pendingNameRaw = classified.raw; // preservamos el RAW.
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  // Safety net: si vimos PRICE_OLD pero NUNCA vimos PRICE_CURRENT,
+  // los precios viejos no nos ayudaron. En ese caso, una sola vez,
+  // podemos intentar el legacy aggregator sobre todo el documento
+  // (puede capturar productos con receipt-shape que el label-aware
+  // path ignoró). El legacy es byte-for-byte, así que esto no
+  // introduce regresiones.
+  if (!sawPriceCurrent && sawPriceOld && productos.length === 0) {
+    return parseLinesLegacy(lines);
+  }
+
+  return productos;
 }
 
 /**

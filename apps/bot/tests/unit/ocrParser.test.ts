@@ -22,7 +22,11 @@ import { describe, expect, it } from 'vitest';
 import type { OCRResult } from '@compras-whatsapp/shared';
 import { EMPTY_OCR_RESULT } from '@compras-whatsapp/shared';
 
-import { parseOCRText } from '../../src/infrastructure/ocr/ocrParser.ts';
+import {
+  classifyLine,
+  defaultUnitForName,
+  parseOCRText,
+} from '../../src/infrastructure/ocr/ocrParser.ts';
 
 /** Helper: crea un OCRResult con texto + tiempo/confianza arbitrarios. */
 function makeRaw(text: string): OCRResult {
@@ -232,6 +236,58 @@ Pantalón $2500`;
       expect(p.cantidad).toBe(1);
       // Unidad LOTE (heurística: "pares" en el título).
       expect(p.unidad).toBe('LOTE');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // T3.2 — `classifyLine` (line classifier del label-aware path).
+  // ─────────────────────────────────────────────────────────────────────
+
+  describe('ocrParser.classifyLine (line classifier)', () => {
+    it('classifies a PRICE_CURRENT line and emits the value as a number', () => {
+      const c = classifyLine('Precio del lote: $33.928');
+      expect(c.label).toBe('PRICE_CURRENT');
+      expect(c.value).toBe(33928);
+      expect(c.raw).toBe('Precio del lote: $33.928');
+    });
+
+    it('classifies a NOISE line and emits value: null', () => {
+      const c = classifyLine('Tienda: ZJ-SHIRUI');
+      expect(c.label).toBe('NOISE');
+      expect(c.value).toBeNull();
+    });
+
+    it('classifies a QUANTITY line in xN form and emits { cantidad, unidad }', () => {
+      const c = classifyLine('Cantidad comprada: x1');
+      expect(c.label).toBe('QUANTITY');
+      expect(c.value).toEqual({ cantidad: 1, unidad: 'UNIDAD' });
+    });
+
+    it('classifies a PRICE_OLD line and emits the value as a number', () => {
+      // El classifier SOLO etiqueta — la desambiguación current/old
+      // ocurre en el aggregator. Aquí validamos que Precio anterior
+      // matchea PRICE_OLD y extrae el número 53385.
+      const c = classifyLine('Precio anterior: ARS$53.385');
+      expect(c.label).toBe('PRICE_OLD');
+      expect(c.value).toBe(53385);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // T3.4 — `defaultUnitForName` (lot-multiplier heuristic).
+  // ─────────────────────────────────────────────────────────────────────
+
+  describe('ocrParser.defaultUnitForName (lot-multiplier heuristic)', () => {
+    it('returns LOTE for a name with a digit + plural unit phrase (e.g., "2 pares de …")', () => {
+      expect(defaultUnitForName('2 pares de calcetines')).toBe('LOTE');
+    });
+
+    it('returns LOTE for a name with a lot-multiplier word (e.g., "Pack 3 remeras")', () => {
+      expect(defaultUnitForName('Pack 3 remeras')).toBe('LOTE');
+    });
+
+    it('returns UNIDAD for a plain name with no lot-multiplier signal', () => {
+      expect(defaultUnitForName('Remera Negra')).toBe('UNIDAD');
     });
   });
 });
