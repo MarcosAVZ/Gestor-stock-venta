@@ -34,6 +34,7 @@ export const UnidadSchema = z.enum([
   Unidad.PAR,
   Unidad.PACK,
   Unidad.CAJA,
+  Unidad.LOTE,
   Unidad.OTRO,
 ]);
 export type { Unidad };

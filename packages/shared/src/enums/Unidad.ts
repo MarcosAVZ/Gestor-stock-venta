@@ -10,6 +10,7 @@ export const Unidad = {
   PAR: 'PAR',
   PACK: 'PACK',
   CAJA: 'CAJA',
+  LOTE: 'LOTE',
   OTRO: 'OTRO',
 } as const;
 
