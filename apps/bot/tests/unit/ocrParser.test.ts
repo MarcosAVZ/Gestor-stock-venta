@@ -196,4 +196,42 @@ Pantalón $2500`;
       expect(r.productos).toEqual([]);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // e-commerce screenshots (cambio ocr-parser-label-aware / WU3).
+  // ─────────────────────────────────────────────────────────────────────
+
+  describe('e-commerce: Temu screenshot (label-aware path)', () => {
+    it('Temu screenshot: parses 1 product with LOTE unit and correct price', () => {
+      // Fixture plausible: Tesseract output de la captura Temu del
+      // proposal §1. Noise + labeled structure. El parser label-aware
+      // debe emitir EXACTAMENTE 1 producto (no 5+ phantom), con el
+      // precio ACTUAL (33.928), no el ANTERIOR (53.385), y con
+      // unidad LOTE porque el título contiene lot-multiplier.
+      const temuText = [
+        'Tienda: ZJ-SHIRUI',
+        'Seguidores: 1.2K',
+        'Artículos: 24',
+        '2 pares de calcetines',
+        'Variante: 10 pares de gatos grises + 10 pares de modelo B',
+        'Precio del lote: ARS$33.928',
+        'Precio anterior: ARS$53.385',
+        'Cantidad comprada: x1',
+      ].join('\n');
+
+      const r = parseOCRText(makeRaw(temuText));
+
+      // Solo el producto real — NOISE + PRICE_OLD deben descartarse.
+      expect(r.productos).toHaveLength(1);
+      const p = r.productos[0]!;
+      // Nombre incluye "calcetines" (substring, case-insensitive).
+      expect(p.nombre.toLowerCase()).toContain('calcetines');
+      // Precio actual, NO el anterior tachado.
+      expect(p.precio).toBe(33928);
+      // Cantidad del x1 explícito.
+      expect(p.cantidad).toBe(1);
+      // Unidad LOTE (heurística: "pares" en el título).
+      expect(p.unidad).toBe('LOTE');
+    });
+  });
 });
