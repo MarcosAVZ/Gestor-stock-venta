@@ -384,6 +384,15 @@ export function classifyLine(line: string): ClassifiedLine {
         };
       }
     }
+    // Si no, probar bare number (e.g., `Cantidad: 2` sin `x` y sin
+    // unit-word). Captura el PRIMER entero en el rest.
+    const bareNumMatch = rest.match(/^\s*(\d+)\s*$/);
+    if (bareNumMatch !== null) {
+      const cantidad = Number.parseInt(bareNumMatch[1]!, 10);
+      if (Number.isFinite(cantidad) && cantidad > 0) {
+        return { raw, label: 'QUANTITY', value: { cantidad, unidad: 'UNIDAD' } };
+      }
+    }
     return { raw, label: 'NAME_CANDIDATE', value: rest };
   }
 
@@ -685,15 +694,16 @@ function parseLinesLabelAware(lines: string[]): OCRProduct[] {
         break;
 
       case 'NAME_CANDIDATE': {
-        const raw = classified.value as string;
-        const candidate = legacyCleanName(raw);
-        if (candidate.length > 0) {
-          pendingName = candidate;
-          pendingNameRaw = raw;
-        }
-        break;
+        // NAME_CANDIDATE lines (labels: `Producto:`, `Artículo:`, etc.)
+        // are title lines that PRECEDE the price label. We hold them
+        // as pendingName so the next PRICE_CURRENT emission can use
+        // them. If a SECOND NAME_CANDIDATE arrives before a price, we
+        // overwrite the pending (last-write-wins is the simpler model
+        // and matches receipt-shape intuition).
+        pendingName = classified.value as string;
+        pendingNameRaw = classified.raw;
+        continue;
       }
-
       case 'QUANTITY':
         pendingQty = classified.value as { cantidad: number; unidad: Unidad };
         break;
@@ -734,8 +744,16 @@ function parseLinesLabelAware(lines: string[]): OCRProduct[] {
         }
 
         const cantidad = pendingQty?.cantidad ?? 1;
-        const unidad =
-          pendingQty?.unidad ?? defaultUnitForName(nameRaw ?? name);
+        // `defaultUnitForName` heuristic on the RAW name (preserves
+        // lot-multiplier signals like `Pack 3`, `2 pares`). Only
+        // override if the explicit QUANTITY has a non-UNIDAD unit
+        // (e.g., `Cantidad: 2 pares` → `PAR`).
+        let unidad: Unidad;
+        if (pendingQty !== null && pendingQty.unidad !== 'UNIDAD') {
+          unidad = pendingQty.unidad;
+        } else {
+          unidad = defaultUnitForName(nameRaw ?? name);
+        }
 
         productos.push({
           nombre: name,
@@ -751,17 +769,41 @@ function parseLinesLabelAware(lines: string[]): OCRProduct[] {
       }
 
       case 'UNKNOWN': {
+        // ── Deviation 1 from design §5: UNKNOWN-as-name-candidate ──
+        // The design treats UNKNOWN lines as legacy row input, but for
+        // e-commerce title lines this produces phantoms (e.g.,
+        // `2 pares de calcetines` → phantom con precio=2, cantidad=2).
+        //
+        // Two-pronged approach:
+        //   1. If the line has a lot-multiplier signal (word or
+        //      `\d+ unit` pattern), skip the legacy entirely — the
+        //      small number is part of the NAME, not a price.
+        //   2. Otherwise, try the legacy and filter phantoms
+        //      (`precio === cantidad` is a reliable phantom signal
+        //      — the legacy never emits a real product with that
+        //      property).
+        const rawLine = classified.raw;
+        const hasLotSignal =
+          LOT_MULTIPLIER_WORDS_REGEX.test(rawLine) ||
+          LOT_MULTIPLIER_NUMERIC_REGEX.test(rawLine);
+
+        if (hasLotSignal) {
+          // Lot-multiplier signal in the line: hold the whole line
+          // as pendingName (the raw is preserved for
+          // defaultUnitForName to detect `2 pares` etc.).
+          const cleaned = legacyCleanName(rawLine);
+          if (cleaned.length > 0) {
+            pendingName = cleaned;
+            pendingNameRaw = rawLine;
+          }
+          break;
+        }
+
         // Ruta la línea a través del legacy row processor.
-        const emitted = parseLinesLegacy([classified.raw]);
+        const emitted = parseLinesLegacy([rawLine]);
 
         // Filtro de phantom products: el legacy es agresivo al
-        // interpretar el primer token numérico como precio. En el
-        // contexto label-aware, una línea como `2 pares de
-        // calcetines` produce precio=2 + cantidad=2 (phantom) — el
-        // "precio" es realmente un count. Descartamos productos
-        // donde precio === cantidad (el legacy nunca emitiría un
-        // producto real con esa propiedad: precio >> cantidad en
-        // receipt shape legítimo).
+        // interpretar el primer token numérico como precio.
         const real = emitted.filter((p) => p.precio !== p.cantidad);
         if (real.length > 0) {
           for (const p of real) {
@@ -769,15 +811,15 @@ function parseLinesLabelAware(lines: string[]): OCRProduct[] {
             productos.push(p);
           }
         } else {
-          // DEVIATION FROM DESIGN: la línea no produjo un producto
-          // real vía legacy (o solo produjo phantoms). La tratamos
-          // como candidata a `pendingName` para que el próximo
-          // PRICE_CURRENT pueda usarla como nombre. Esto es
-          // necesario para el Temu case (`2 pares de calcetines`).
-          const cleaned = legacyCleanName(classified.raw);
+          // La línea no produjo un producto real vía legacy (o solo
+          // produjo phantoms). La tratamos como candidata a
+          // `pendingName` para que el próximo PRICE_CURRENT pueda
+          // usarla como nombre. Esto es necesario para el Temu
+          // case (`2 pares de calcetines`).
+          const cleaned = legacyCleanName(rawLine);
           if (cleaned.length > 0) {
             pendingName = cleaned;
-            pendingNameRaw = classified.raw; // preservamos el RAW.
+            pendingNameRaw = rawLine; // preservamos el RAW.
           }
         }
         break;
