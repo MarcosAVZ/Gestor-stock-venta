@@ -47,6 +47,7 @@ import {
 } from '@compras-whatsapp/shared';
 
 import {
+  LABEL_DETECTION_REGEX,
   LOTE_CONTENT_SET,
   NAME_CANDIDATE_SET,
   NOISE_SET,
@@ -111,7 +112,7 @@ interface ParsedPrice {
  *
  * Devuelve `null` si el token no es parseable o es <= 0.
  */
-function parsePriceToken(token: string): number | null {
+function legacyParsePriceToken(token: string): number | null {
   if (token.length === 0) return null;
 
   const lastDot = token.lastIndexOf('.');
@@ -146,13 +147,13 @@ function parsePriceToken(token: string): number | null {
   return n;
 }
 
-function extractPricesFromLine(line: string): ParsedPrice[] {
+function legacyExtractPricesFromLine(line: string): ParsedPrice[] {
   const out: ParsedPrice[] = [];
   PRICE_REGEX.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = PRICE_REGEX.exec(line)) !== null) {
     const token = match[1]!;
-    const value = parsePriceToken(token);
+    const value = legacyParsePriceToken(token);
     if (value !== null) {
       // Calculamos el offset del número (no del prefijo) dentro del
       // match. match[0] incluye el prefijo, así que usamos
@@ -170,7 +171,7 @@ function extractPricesFromLine(line: string): ParsedPrice[] {
   return out;
 }
 
-function extractQuantityFromLine(
+function legacyExtractQuantityFromLine(
   line: string,
 ): { cantidad: number; unidad: Unidad } | null {
   QTY_REGEX.lastIndex = 0;
@@ -186,7 +187,7 @@ function extractQuantityFromLine(
 }
 
 /** "2x Producto" — cantidad al inicio de la línea. */
-function extractLeadingQuantity(line: string): {
+function legacyExtractLeadingQuantity(line: string): {
   cantidad: number;
   rest: string;
 } | null {
@@ -197,7 +198,7 @@ function extractLeadingQuantity(line: string): {
   return { cantidad, rest: line.slice(m[0].length) };
 }
 
-function cleanName(raw: string): string {
+function legacyCleanName(raw: string): string {
   let s = raw;
   // Quitar prefijos de moneda residuales
   s = s.replace(/(?:AR\s*\$|ARS|\$)/g, ' ');
@@ -224,7 +225,7 @@ function cleanName(raw: string): string {
 // Esta sección implementa Pass 1 (line classifier) del label-aware
 // path. El aggregator (Pass 2) y el dispatch desde `parseOCRText`
 // (Pass 0) se agregan en tasks siguientes (T3.3, T3.4). Por ahora,
-// `parseOCRText` sigue usando el path legacy de `parseLines` y el
+// `parseOCRText` sigue usando el path legacy de `parseLinesLegacy` y el
 // T3.1 Temu test sigue RED — esto es por diseño, la clasificación
 // se introduce ANTES del wiring para poder testear las unidades
 // puras en isolation.
@@ -343,7 +344,7 @@ export function classifyLine(line: string): ClassifiedLine {
     // (los dígitos son case-invariant). Por simplicidad, usamos m[2]
     // directamente para la extracción de precio.
     const rest = m[2] ?? '';
-    const prices = extractPricesFromLine(rest);
+    const prices = legacyExtractPricesFromLine(rest);
     if (prices.length > 0) {
       return { raw, label: 'PRICE_CURRENT', value: prices[0]!.value };
     }
@@ -353,7 +354,7 @@ export function classifyLine(line: string): ClassifiedLine {
   m = PRICE_OLD_LINE_REGEX.exec(nfd);
   if (m !== null) {
     const rest = m[2] ?? '';
-    const prices = extractPricesFromLine(rest);
+    const prices = legacyExtractPricesFromLine(rest);
     if (prices.length > 0) {
       return { raw, label: 'PRICE_OLD', value: prices[0]!.value };
     }
@@ -425,7 +426,7 @@ export function classifyLine(line: string): ClassifiedLine {
  * El cap de `MAX_PRODUCTOS` se respeta incluso si quedan más
  * productos por emitir (defensa contra OCR garbage).
  */
-function parseLines(lines: string[]): OCRProduct[] {
+function parseLinesLegacy(lines: string[]): OCRProduct[] {
   const productos: OCRProduct[] = [];
   let pendingName: string | null = null;
   let pendingQty: { cantidad: number; unidad: Unidad } | null = null;
@@ -436,8 +437,8 @@ function parseLines(lines: string[]): OCRProduct[] {
     const trimmed = rawLine.trim();
     if (trimmed.length === 0) continue;
 
-    const prices = extractPricesFromLine(trimmed);
-    const qtyOnLine = extractQuantityFromLine(trimmed);
+    const prices = legacyExtractPricesFromLine(trimmed);
+    const qtyOnLine = legacyExtractQuantityFromLine(trimmed);
 
     if (prices.length === 0) {
       // Sin precio en esta línea.
@@ -463,14 +464,14 @@ function parseLines(lines: string[]): OCRProduct[] {
         if (nextTrim.length === 0) continue;
         // Primero chequear qty (puede ser "1 par" que también matchea
         // como precio de "1" — el qty gana).
-        const nextQty = extractQuantityFromLine(nextTrim);
+        const nextQty = legacyExtractQuantityFromLine(nextTrim);
         if (nextQty !== null) {
           lookaheadQty = nextQty;
           break;
         }
         // Si no hay qty pero hay un "precio" claro (con separador),
         // paramos: la siguiente línea es un producto nuevo.
-        const nextPrices = extractPricesFromLine(nextTrim);
+        const nextPrices = legacyExtractPricesFromLine(nextTrim);
         const hasRealPrice = nextPrices.some((p) => /[.,]/.test(p.raw));
         if (hasRealPrice) break;
         // Texto sin números: paramos (no es qty).
@@ -484,13 +485,13 @@ function parseLines(lines: string[]): OCRProduct[] {
       const p = prices[k]!;
       nameSource = nameSource.slice(0, p.index) + nameSource.slice(p.index + p.length);
     }
-    let nombre = cleanName(nameSource);
+    let nombre = legacyCleanName(nameSource);
     if (nombre.length === 0 && pendingName !== null) {
-      nombre = cleanName(pendingName);
+      nombre = legacyCleanName(pendingName);
     }
 
     // Leading quantity: "2x Producto" al inicio de la línea de precio.
-    const leading = extractLeadingQuantity(trimmed);
+    const leading = legacyExtractLeadingQuantity(trimmed);
 
     // Cantidad: priorizamos qty-en-misma-línea, luego leading,
     // luego pending, luego look-ahead.
@@ -538,15 +539,79 @@ function parseLines(lines: string[]): OCRProduct[] {
 }
 
 /**
+ * Pass 0 (label-detection scan) del label-aware path (design §3).
+ *
+ * Devuelve `true` si AL MENOS una línea no-vacía del documento
+ * contiene un label conocido al inicio (NFD-normalized + tested
+ * contra `LABEL_DETECTION_REGEX`).
+ *
+ * Es la decisión que hace `parseOCRText`:
+ * - `true` → el documento es e-commerce-shape (Temu / ML / Shein) →
+ *   usar el label-aware path.
+ * - `false` → el documento es receipt-shape (sin labels) → usar el
+ *   legacy line-by-line path. Este es el fallback que preserva
+ *   byte-for-byte el comportamiento de `parseLines` legacy.
+ *
+ * Es cheap: un solo pass lineal, una regex test por línea no-vacía.
+ * El caller ya spliteó `textoCompleto` por líneas; recibimos `lines`.
+ */
+function detectAnyLabel(lines: string[]): boolean {
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    const nfd = normalizeLabel(trimmed);
+    if (LABEL_DETECTION_REGEX.test(nfd)) return true;
+  }
+  return false;
+}
+
+/**
+ * Pass 2 (label-aware aggregator) — STUB en T3.3.
+ *
+ * Se implementa en T3.4 (la siguiente task). Por ahora devuelve
+ * `[]` para que el dispatch de `parseOCRText` esté wired pero el
+ * label-aware path todavía no haga nada — así los tests de
+ * receipt-shape (legacy fallback) siguen pasando byte-for-byte
+ * aunque el Temu test siga RED (esperado: el stub ignora los
+ * labels del Temu).
+ */
+function parseLinesLabelAware(_lines: string[]): OCRProduct[] {
+  return [];
+}
+
+/**
  * Punto de entrada: parsea el `textoCompleto` de un `OCRResult` y
  * devuelve un NUEVO `OCRResult` con `productos` poblado.
  *
  * El `OCRResult` original (tiempoMs, confianzaPromedio, textoCompleto)
  * se preserva; solo `productos` se reemplaza.
+ *
+ * ARQUITECTURA (cambio `ocr-parser-label-aware` · WU3):
+ * Tres stages (Pass 0, Pass 1, Pass 2) con un verbatim legacy
+ * fallback para receipt-shape input:
+ *
+ *   Pass 0 (detectAnyLabel) → decide el path:
+ *     ├── NO labels → parseLinesLegacy (verbatim copy de
+ *     │                parseLines pre-cambio) — preserva el
+ *     │                comportamiento de receipt-shape byte-for-byte.
+ *     └── HAS labels → parseLinesLabelAware (stub en T3.3,
+ *                     implementación en T3.4).
+ *
+ *   Pass 1 (classifyLine) — pure function, exportada para testing.
+ *   Pass 2 (parseLinesLabelAware internamente) — consume los
+ *           ClassifiedLine[] y produce OCRProduct[].
+ *
+ * Defensa R1: `parseLinesLegacy` es una copia byte-for-byte del
+ * `parseLines` pre-cambio. No se refactorizó. Los 16+ tests de
+ * receipt-shape son el contrato — si alguno falla después de un
+ * cambio al legacy, el refactor rompió algo.
  */
 export function parseOCRText(raw: OCRResult): OCRResult {
   const lines = raw.textoCompleto.split(/\r?\n/);
-  const productos = parseLines(lines);
+  const hasLabels = detectAnyLabel(lines);
+  const productos = hasLabels
+    ? parseLinesLabelAware(lines)
+    : parseLinesLegacy(lines);
 
   return {
     ...raw,
