@@ -46,6 +46,17 @@ import {
   UnidadSchema,
 } from '@compras-whatsapp/shared';
 
+import {
+  LOTE_CONTENT_SET,
+  NAME_CANDIDATE_SET,
+  NOISE_SET,
+  PRICE_CURRENT_SET,
+  PRICE_OLD_SET,
+  QUANTITY_KEYWORDS,
+  QUANTITY_XN_REGEX,
+  normalizeLabel,
+} from './labelTaxonomy.ts';
+
 /** Tope de productos por OCR (defensa contra falsos positivos). */
 const MAX_PRODUCTOS = 10;
 /** Tope de chars para `nombre` (Zod no lo enforcea, pero el display
@@ -205,6 +216,189 @@ function cleanName(raw: string): string {
     s = s.slice(0, MAX_NOMBRE_CHARS).trim();
   }
   return s;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Label-aware path (cambio `ocr-parser-label-aware` · WU3).
+//
+// Esta sección implementa Pass 1 (line classifier) del label-aware
+// path. El aggregator (Pass 2) y el dispatch desde `parseOCRText`
+// (Pass 0) se agregan en tasks siguientes (T3.3, T3.4). Por ahora,
+// `parseOCRText` sigue usando el path legacy de `parseLines` y el
+// T3.1 Temu test sigue RED — esto es por diseño, la clasificación
+// se introduce ANTES del wiring para poder testear las unidades
+// puras en isolation.
+//
+// PASS 1 — `classifyLine(line)`:
+// Para cada línea no-vacía, detecta el label al inicio (NFD-normalized
+// para tolerar acentos y casing), y emite UN `ClassifiedLine` con la
+// categoría semántica y el value extraído. El aggregator (Pass 2) los
+// consumirá en document order. La detección es determinística y pura:
+// no muta estado, no llama al OCR, no toca el DOM.
+// ─────────────────────────────────────────────────────────────────────
+
+/** Categoría semántica de una línea OCR. */
+export type LabelType =
+  | 'NOISE'
+  | 'PRICE_CURRENT'
+  | 'PRICE_OLD'
+  | 'QUANTITY'
+  | 'NAME_CANDIDATE'
+  | 'LOTE_CONTENT'
+  | 'UNKNOWN';
+
+/** Shape del `value` de un `ClassifiedLine` — depende del `label`. */
+export type ClassifiedValue =
+  | number
+  | { cantidad: number; unidad: Unidad }
+  | string
+  | null;
+
+/** Línea OCR clasificada: la línea cruda + su categoría semántica
+ *  + el value extraído (forma depende del label). */
+export interface ClassifiedLine {
+  raw: string;
+  label: LabelType;
+  value: ClassifiedValue;
+}
+
+/** Construye un regex per-set que captura el label matcheado (group 1)
+ *  y el residuo (group 2).
+ *
+ *  Dos problemas a resolver:
+ *  1. **Longest-match**: en regex alternation, JS es leftmost-greedy,
+ *     no longest. Ordenamos por length DESC y usamos un lookahead
+ *     estricto que requiere un separador (`:`/`：`/`-`/`–`) o fin de
+ *     string después del label — esto evita que `precio` (PRICE_CURRENT)
+ *     matchee el inicio de `precio anterior` (PRICE_OLD) cuando el
+ *     siguiente char es space + otra letra.
+ *  2. **Case + diacritics**: los labels en el set están en NFD
+ *     normalizada (lowercase, sin diacríticos). El caller debe pasar
+ *     la línea YA normalizada (usando `normalizeLabel`).
+ */
+function makeSetRegex(set: ReadonlySet<string>): RegExp {
+  const sortedKeys = [...set].sort((a, b) => b.length - a.length);
+  const escapeRegex = (s: string): string =>
+    s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const alternation = sortedKeys.map(escapeRegex).join('|');
+  // El lookahead `(?=\s*[:：\-–]|$)` requiere que el label sea
+  // seguido por un separator (con optional whitespace) o fin de
+  // input. Sin este lookahead, `precio` matchearía `precioX`
+  // (precio + X) — X no es word boundary y no es separador.
+  return new RegExp(
+    `^\\s*(${alternation})(?=\\s*[:：\\-–]|$)\\s*[:：\\-–]?\\s*(.*)$`,
+    'i',
+  );
+}
+
+/** Regex per-set (pre-compiladas al module load). */
+const NOISE_LINE_REGEX = makeSetRegex(NOISE_SET);
+const PRICE_CURRENT_LINE_REGEX = makeSetRegex(PRICE_CURRENT_SET);
+const PRICE_OLD_LINE_REGEX = makeSetRegex(PRICE_OLD_SET);
+const QUANTITY_LINE_REGEX = makeSetRegex(QUANTITY_KEYWORDS);
+const NAME_CANDENT_LINE_REGEX = makeSetRegex(NAME_CANDIDATE_SET);
+const LOTE_CONTENT_LINE_REGEX = makeSetRegex(LOTE_CONTENT_SET);
+
+/**
+ * Clasifica una línea OCR individual.
+ *
+ * Algoritmo (Pass 1 del label-aware path, design §4):
+ * 1. Trim de la línea.
+ * 2. Si está vacía → UNKNOWN.
+ * 3. NFD-normalize para el matching de labels.
+ * 4. Probar cada set en orden de prioridad:
+ *    NOISE → PRICE_CURRENT → PRICE_OLD → QUANTITY
+ *    → NAME_CANDIDATE → LOTE_CONTENT.
+ * 5. Para PRICE_CURRENT/PRICE_OLD: extraer el primer precio del
+ *    residuo. Si no hay precio parseable, demote a NAME_CANDIDATE
+ *    (la línea no se pierde — el aggregator la trata como name
+ *    candidate).
+ * 6. Para QUANTITY: probar `QUANTITY_XN_REGEX` (e.g., `x1`) primero;
+ *    si no, probar la regex de cantidad con palabra de unidad
+ *    (e.g., `2 unidades`). Si no parsea, demote a NAME_CANDIDATE.
+ * 7. Si ningún set matchea → UNKNOWN (la línea se routea a través
+ *    del legacy row processor dentro del aggregator).
+ *
+ * El `raw` field del resultado preserva la línea ORIGINAL
+ * (post-trim, con casing original) — el matching usa el NFD pero
+ * el output es el raw.
+ */
+export function classifyLine(line: string): ClassifiedLine {
+  const raw = line.trim();
+  if (raw.length === 0) {
+    return { raw, label: 'UNKNOWN', value: raw };
+  }
+  const nfd = normalizeLabel(raw);
+
+  let m: RegExpExecArray | null;
+
+  m = NOISE_LINE_REGEX.exec(nfd);
+  if (m !== null) return { raw, label: 'NOISE', value: null };
+
+  m = PRICE_CURRENT_LINE_REGEX.exec(nfd);
+  if (m !== null) {
+    // m[2] es el residuo post-label en NFD form. La regex de precio
+    // (PRICE_REGEX) tiene un prefix opcional (AR$/ARS/$) y matchea
+    // el número; la case del prefix no afecta al match del número
+    // (los dígitos son case-invariant). Por simplicidad, usamos m[2]
+    // directamente para la extracción de precio.
+    const rest = m[2] ?? '';
+    const prices = extractPricesFromLine(rest);
+    if (prices.length > 0) {
+      return { raw, label: 'PRICE_CURRENT', value: prices[0]!.value };
+    }
+    return { raw, label: 'NAME_CANDIDATE', value: rest };
+  }
+
+  m = PRICE_OLD_LINE_REGEX.exec(nfd);
+  if (m !== null) {
+    const rest = m[2] ?? '';
+    const prices = extractPricesFromLine(rest);
+    if (prices.length > 0) {
+      return { raw, label: 'PRICE_OLD', value: prices[0]!.value };
+    }
+    return { raw, label: 'NAME_CANDIDATE', value: rest };
+  }
+
+  m = QUANTITY_LINE_REGEX.exec(nfd);
+  if (m !== null) {
+    const rest = m[2] ?? '';
+    // Primero probar xN (`x1`, `X 2`, `x 3`).
+    const xnMatch = rest.match(QUANTITY_XN_REGEX);
+    if (xnMatch !== null) {
+      const cantidad = Number.parseInt(xnMatch[1]!, 10);
+      return { raw, label: 'QUANTITY', value: { cantidad, unidad: 'UNIDAD' } };
+    }
+    // Si no, probar `N unidades` / `N pares` / etc.
+    const qtyWordMatch = rest.match(QTY_REGEX);
+    if (qtyWordMatch !== null) {
+      const cantidad = Number.parseInt(qtyWordMatch[1]!, 10);
+      if (Number.isFinite(cantidad) && cantidad > 0) {
+        const unitWord = qtyWordMatch[2]!.toLowerCase();
+        const unidad = UNIT_KEYWORDS[unitWord] ?? 'OTRO';
+        return {
+          raw,
+          label: 'QUANTITY',
+          value: { cantidad, unidad: UnidadSchema.parse(unidad) },
+        };
+      }
+    }
+    return { raw, label: 'NAME_CANDIDATE', value: rest };
+  }
+
+  m = NAME_CANDENT_LINE_REGEX.exec(nfd);
+  if (m !== null) {
+    const rest = m[2] ?? '';
+    return { raw, label: 'NAME_CANDIDATE', value: rest };
+  }
+
+  m = LOTE_CONTENT_LINE_REGEX.exec(nfd);
+  if (m !== null) {
+    const rest = m[2] ?? '';
+    return { raw, label: 'LOTE_CONTENT', value: rest };
+  }
+
+  return { raw, label: 'UNKNOWN', value: raw };
 }
 
 /**
