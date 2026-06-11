@@ -44,13 +44,14 @@ enum Moneda {
 }
 
 enum ConversationState {
-  ESPERANDO_IMAGEN
-  VALIDANDO_DATOS
+  PREGUNTANDO_PRODUCTO
   PREGUNTANDO_CANTIDAD
   PREGUNTANDO_UNIDAD
+  PREGUNTANDO_COSTO_LOTE
   PREGUNTANDO_PRECIO_VENTA
   CONFIRMACION_FINAL
   GUARDADO
+  AGREGANDO_STOCK
 }
 
 // ── Modelos ──────────────────────────────────────────────────────────
@@ -70,7 +71,6 @@ model Compra {
   id             String       @id @default(cuid())
   usuarioId      String
   fecha          DateTime     @default(now())
-  imagenOriginal String? // path local: data/images/{año}/{mes}/{uuid}.{ext}
   moneda         Moneda       @default(ARS)
   items          ItemCompra[]
   usuario        Usuario      @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
@@ -101,7 +101,7 @@ model ItemCompra {
 model Conversacion {
   id              String            @id @default(cuid())
   usuarioId       String            @unique
-  estado          ConversationState @default(ESPERANDO_IMAGEN)
+  estado          ConversationState @default(PREGUNTANDO_PRODUCTO)
   datosTemporales Json              @default("{}")
   updatedAt       DateTime          @updatedAt
   createdAt       DateTime          @default(now())
