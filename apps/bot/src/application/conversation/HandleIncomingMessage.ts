@@ -49,6 +49,7 @@ import {
   parseQueryCommand,
   logUnknownCommand,
   UNKNOWN_COMMAND_MESSAGE,
+  HELP_TEXT,
   type QueryDeps,
 } from '../queries/index.ts';
 
@@ -251,13 +252,7 @@ async function handleSlashCommand(
     case 'ayuda': {
       // Return help text, no state change
       return {
-        responses: [
-          'Comandos disponibles:\n' +
-          '/nueva — cargar una nueva compra\n' +
-          '/agregar — agregar stock a un producto existente\n' +
-          '/ayuda — ver esta ayuda\n\n' +
-          'Consultas: resumen, estadisticas, ganancias, productos, stock, producto <nombre>, compras mes, top ganancias.',
-        ],
+        responses: [HELP_TEXT],
         newState: workingState,
         rejected: false,
       };

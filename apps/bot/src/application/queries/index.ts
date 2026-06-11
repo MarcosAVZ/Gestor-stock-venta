@@ -429,6 +429,27 @@ export async function executeQuery(
   }
 }
 
+/** Texto completo para /ayuda — lista todos los comandos disponibles. */
+export const HELP_TEXT = `Comandos disponibles:
+
+/nueva — Cargar una compra nueva. Te voy a hacer paso a paso las preguntas.
+/agregar — Agregar stock a un producto que ya cargaste.
+/ayuda — Mostrar esta ayuda.
+
+Consultas:
+• resumen — Resumen del mes actual.
+• estadisticas — Totales históricos.
+• ganancias — Ganancia potencial acumulada.
+• productos — Lista de productos cargados.
+• stock — Productos con stock total.
+• producto <nombre> — Detalle de un producto.
+• compras mes — Listado de compras del mes.
+• top ganancias — Top productos por ganancia.
+
+En cualquier momento:
+• cancelar — Cancelar el flujo actual.
+• menu — Volver al inicio.`;
+
 /** Mensaje de ayuda cuando el usuario tipea un comando desconocido. */
 export const UNKNOWN_COMMAND_MESSAGE =
   'No entendí. Comandos: /nueva, /agregar, /ayuda, resumen, estadisticas, ganancias, productos, ' +
