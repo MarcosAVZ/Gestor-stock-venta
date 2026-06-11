@@ -58,7 +58,7 @@ import { calcularMetricas } from '../pricing/CalcularMetricas.ts';
 /**
  * Schema que valida el shape de `datosTemporales` requerido para
  * persistir una compra. Acepta ambas variantes (ingresada o sugerida
- * del OCR) para cantidad y unidad.
+  * del paso anterior) para cantidad y unidad.
  */
 const datosParaGuardarSchema = z.object({
   producto: z.string().min(1, 'Falta el nombre del producto.'),
