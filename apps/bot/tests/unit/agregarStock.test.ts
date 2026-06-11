@@ -36,7 +36,7 @@ function buildMockCompraRepo() {
 
 function buildMockItemCompraRepo() {
   return {
-    createMany: vi.fn(async (items: Array<{ compraId: string; nombre: string; cantidadLote: number }>) => [
+    createMany: vi.fn(async (items: Array<Record<string, unknown>>) => [
       {
         id: 'item-nuevo-1',
         compraId: items[0]?.compraId ?? 'compra-nueva-1',

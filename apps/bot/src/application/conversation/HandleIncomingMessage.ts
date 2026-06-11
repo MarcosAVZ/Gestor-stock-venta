@@ -18,7 +18,7 @@
  * testeable con mocks de los repos y del rate limiter.
  */
 
-import { ConversationState, type Unidad } from '@compras-whatsapp/db';
+import { ConversationState } from '@compras-whatsapp/db';
 import type { Logger } from 'pino';
 
 import {
@@ -271,7 +271,7 @@ async function runStateMachine(params: {
   event: ConversationEvent;
   deps: HandleIncomingMessageDeps;
 }): Promise<HandleIncomingMessageOutput> {
-  const { input, workingState, workingDatos, usuarioId, event, deps } = params;
+  const { workingState, workingDatos, usuarioId, event, deps } = params;
   const { logger, conversacionRepo, compraRepo, itemCompraRepo } = deps;
 
   // ── State machine ──────────────────────────────────────────────

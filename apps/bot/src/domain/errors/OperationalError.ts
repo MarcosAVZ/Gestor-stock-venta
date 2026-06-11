@@ -82,37 +82,4 @@ export class RateLimitError extends OperationalError {
   }
 }
 
-/**
- * OCR falló (timeout, parse error, confianza < threshold, etc.).
- * code: `ocr_failed`. Es operacional porque el caller puede responder
- * con "no pude leer la imagen, ¿la reenviás?" y seguir funcionando.
- *
- * Subclases provistas:
- * - `OcrTimeoutError`: el worker tardó más de `timeoutMs` (default 30s).
- *   Se `worker.terminate()` y se re-lanza con este error.
- */
-export class OcrFailedError extends OperationalError {
-  constructor(
-    message: string,
-    options: { cause?: unknown; metadata?: AppErrorMetadata } = {},
-  ) {
-    super('ocr_failed', message, options);
-  }
-}
 
-/**
- * El OCR tardó más que el timeout configurado. Subclase de
- * `OcrFailedError` para que el caller pueda distinguir (respuesta
- * diferente al user: "la imagen tardó demasiado").
- */
-export class OcrTimeoutError extends OcrFailedError {
-  constructor(
-    message: string,
-    options: { timeoutMs?: number; cause?: unknown; metadata?: AppErrorMetadata } = {},
-  ) {
-    super(message, {
-      ...options,
-      metadata: { ...(options.metadata ?? {}), timeoutMs: options.timeoutMs },
-    });
-  }
-}

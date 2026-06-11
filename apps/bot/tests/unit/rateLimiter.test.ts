@@ -4,10 +4,9 @@
  * Cubre:
  * - canSendMessage: allowed al primer mensaje; rejected durante cooldown;
  *   allowed después del cooldown.
- * - canSendImage: idem con imageMs.
  * - canSaveCompra: allowed hasta N; rejected al N+1; allowed después
  *   de 24h (con fake timers).
- * - recordMessage / recordImage / recordCompra: append timestamps.
+ * - recordMessage / recordCompra: append timestamps.
  * - dailyCompraCount: rolling window de 24h.
  * - Reset independiente entre phones (un phone saturado no afecta otro).
  * - Verdict shape: allowed + retryAfterSec + reason.
@@ -18,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RateLimiter } from '../../src/infrastructure/messaging/rateLimiter.ts';
 
 const NOW = 1_700_000_000_000; // epoch fijo
-const config = { messageMs: 2000, imageMs: 10_000, dailyCompras: 30 };
+const config = { messageMs: 2000, dailyCompras: 30 };
 
 describe('RateLimiter', () => {
   beforeEach(() => {
@@ -67,26 +66,6 @@ describe('RateLimiter', () => {
     });
   });
 
-  describe('canSendImage / recordImage', () => {
-    it('rejects a second image within imageMs (10s)', () => {
-      const rl = new RateLimiter(config);
-      rl.recordImage('+5491111111111');
-      vi.advanceTimersByTime(9_999);
-      const verdict = rl.canSendImage('+5491111111111');
-      expect(verdict.allowed).toBe(false);
-      expect(verdict.reason).toBe('image_cooldown');
-      // retryAfterSec: ceil((10000 - 9999) / 1000) = 1
-      expect(verdict.retryAfterSec).toBe(1);
-    });
-
-    it('allows a new image after 10s', () => {
-      const rl = new RateLimiter(config);
-      rl.recordImage('+5491111111111');
-      vi.advanceTimersByTime(10_001);
-      expect(rl.canSendImage('+5491111111111').allowed).toBe(true);
-    });
-  });
-
   describe('canSaveCompra / dailyCompraCount', () => {
     it('allows up to dailyCompras purchases', () => {
       const rl = new RateLimiter({ ...config, dailyCompras: 3 });
@@ -125,27 +104,15 @@ describe('RateLimiter', () => {
       expect(rl.canSendMessage('+5491111111111').allowed).toBe(false);
       expect(rl.canSendMessage('+5491199999999').allowed).toBe(true);
     });
-
-    it('each phone has independent image and message cooldown', () => {
-      const rl = new RateLimiter(config);
-      rl.recordMessage('+5491111111111');
-      rl.recordImage('+5491111111111');
-      // Mensaje cooldown aplica solo a mensajes, no imágenes
-      vi.advanceTimersByTime(2_500);
-      expect(rl.canSendMessage('+5491111111111').allowed).toBe(true);
-      expect(rl.canSendImage('+5491111111111').allowed).toBe(false);
-    });
   });
 
   describe('reset', () => {
     it('clears all state', () => {
       const rl = new RateLimiter(config);
       rl.recordMessage('+5491111111111');
-      rl.recordImage('+5491111111111');
       rl.recordCompra('+5491111111111');
       rl.reset();
       expect(rl.canSendMessage('+5491111111111').allowed).toBe(true);
-      expect(rl.canSendImage('+5491111111111').allowed).toBe(true);
       expect(rl.dailyCompraCount('+5491111111111')).toBe(0);
     });
   });

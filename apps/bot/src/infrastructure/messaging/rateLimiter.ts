@@ -3,7 +3,6 @@
  *
  * Implementa la regla req-whitelist-and-rate-limit (OWASP A04):
  *   - 1 mensaje de texto cada 2s (RATE_LIMIT_MESSAGE_MS)
- *   - 1 imagen cada 10s (RATE_LIMIT_IMAGE_MS)
  *   - máximo 30 compras/día por usuario (RATE_LIMIT_DAILY_COMPRAS)
  *
  * Decisión: in-memory `Map<phone, timestamps[]>` en lugar de Redis.
@@ -14,7 +13,7 @@
  *
  * Decisión: timestamps se guardan como `number[]` y se filtran los
  * antiguos con `Date.now()` cada vez que se chequea. Esto es O(n)
- * por check pero con n≤2 (mensaje + imagen en los últimos minutos)
+ * por check pero con n≤1 (mensaje en los últimos minutos)
  * es negligible. La alternativa sería un ring buffer con TTL.
  *
  * Decisión: el rate limiter NO envía mensajes al usuario; retorna
@@ -29,7 +28,6 @@
 
 export interface RateLimitConfig {
   messageMs: number;
-  imageMs: number;
   dailyCompras: number;
 }
 
@@ -38,15 +36,13 @@ export interface RateLimitVerdict {
   /** Segundos a esperar antes de reintentar (0 si allowed=true). */
   retryAfterSec: number;
   /** Razón específica del rechazo (para logging). */
-  reason?: 'message_cooldown' | 'image_cooldown' | 'daily_compras_exceeded';
+  reason?: 'message_cooldown' | 'daily_compras_exceeded';
 }
 
 export class RateLimiter {
   private readonly config: RateLimitConfig;
   /** Mensajes (texto) por phone, en orden cronológico ascendente. */
   private readonly messageTimestamps = new Map<string, number[]>();
-  /** Imágenes por phone. */
-  private readonly imageTimestamps = new Map<string, number[]>();
   /** Compras por phone (mismo shape; usamos para `dailyCompraCount`). */
   private readonly compraTimestamps = new Map<string, number[]>();
 
@@ -75,17 +71,7 @@ export class RateLimiter {
     };
   }
 
-  canSendImage(phone: string, now: number = Date.now()): RateLimitVerdict {
-    const last = this.lastTimestamp(this.imageTimestamps, phone);
-    if (last === null) return { allowed: true, retryAfterSec: 0 };
-    const elapsed = now - last;
-    if (elapsed >= this.config.imageMs) return { allowed: true, retryAfterSec: 0 };
-    return {
-      allowed: false,
-      retryAfterSec: Math.ceil((this.config.imageMs - elapsed) / 1000),
-      reason: 'image_cooldown',
-    };
-  }
+
 
   /**
    * Chequea si el phone puede guardar una compra más HOY.
@@ -111,9 +97,7 @@ export class RateLimiter {
     this.appendTimestamp(this.messageTimestamps, phone, now);
   }
 
-  recordImage(phone: string, now: number = Date.now()): void {
-    this.appendTimestamp(this.imageTimestamps, phone, now);
-  }
+
 
   recordCompra(phone: string, now: number = Date.now()): void {
     this.appendTimestamp(this.compraTimestamps, phone, now);
@@ -130,7 +114,6 @@ export class RateLimiter {
   /** Reset TOTAL del state — solo para tests. */
   reset(): void {
     this.messageTimestamps.clear();
-    this.imageTimestamps.clear();
     this.compraTimestamps.clear();
   }
 

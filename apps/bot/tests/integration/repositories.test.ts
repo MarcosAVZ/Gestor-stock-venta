@@ -41,7 +41,6 @@ const fakeCompra: Compra = {
   id: 'cmp_xyz',
   usuarioId: 'usr_abc',
   fecha: new Date('2026-01-15T00:00:00Z'),
-  imagenOriginal: null,
   moneda: Moneda.ARS,
 };
 
@@ -62,7 +61,7 @@ const fakeItem: ItemCompra = {
 const fakeConversacion: Conversacion = {
   id: 'cnv_1',
   usuarioId: 'usr_abc',
-  estado: ConversationState.ESPERANDO_IMAGEN,
+  estado: ConversationState.PREGUNTANDO_PRODUCTO,
   datosTemporales: {},
   updatedAt: new Date('2026-01-15T00:00:00Z'),
   createdAt: new Date('2026-01-15T00:00:00Z'),
@@ -325,7 +324,7 @@ describe('PrismaConversacionRepository (mocked client)', () => {
       where: { usuarioId: 'usr_abc' },
       create: {
         usuarioId: 'usr_abc',
-        estado: ConversationState.ESPERANDO_IMAGEN,
+  estado: ConversationState.PREGUNTANDO_PRODUCTO,
         datosTemporales: {},
       },
       update: {},

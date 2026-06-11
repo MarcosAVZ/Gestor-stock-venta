@@ -83,7 +83,6 @@ describe('saveCompra', () => {
     expect(result.metricas.gananciaTotalEstimada).toBe(16_800);
     expect(compraRepo.create).toHaveBeenCalledWith({
       usuarioId: 'user-1',
-      imagenOriginal: undefined,
     });
     expect(itemCompraRepo.createMany).toHaveBeenCalledTimes(1);
   });
@@ -176,7 +175,7 @@ describe('saveCompra', () => {
     ).rejects.toBeInstanceOf(InvariantViolationError);
   });
 
-  it('imagenOriginal se omite del create call', async () => {
+  it('create only receives usuarioId', async () => {
     const compraRepo = buildMockCompraRepo();
     const itemCompraRepo = buildMockItemCompraRepo();
     await saveCompra(

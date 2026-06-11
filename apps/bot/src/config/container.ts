@@ -108,7 +108,7 @@ export async function buildContainer(opts: ContainerOptions = {}): Promise<AppCo
       env: env.NODE_ENV,
       port: env.PORT,
       sessionPath: env.SESSION_PATH,
-      imagesPath: env.IMAGES_PATH,
+
       logLevel: env.LOG_LEVEL,
     },
     'container: building app',
@@ -130,7 +130,7 @@ export async function buildContainer(opts: ContainerOptions = {}): Promise<AppCo
   // 3. RateLimiter
   const rateLimiter = new RateLimiter({
     messageMs: env.RATE_LIMIT_MESSAGE_MS,
-    imageMs: env.RATE_LIMIT_IMAGE_MS,
+
     dailyCompras: env.RATE_LIMIT_DAILY_COMPRAS,
   });
 

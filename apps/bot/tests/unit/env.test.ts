@@ -6,7 +6,7 @@
  * - Phone E.164: rechaza formatos inválidos con mensaje claro.
  * - Phone list: comma-separated, trim, al menos 1.
  * - DATABASE_URL: rechaza URLs que no son postgres.
- * - Number coercion: PORT, OCR_*, RATE_LIMIT_* desde string.
+ * - Number coercion: PORT, RATE_LIMIT_* desde string.
  * - Invalid env retorna issues estructurados (no throw).
  * - loadEnv() hace process.exit(1) en fallo (mockeado).
  */
@@ -32,11 +32,7 @@ describe('env loader', () => {
         expect(result.data.OWNER_PHONE_NUMBERS).toEqual(['+5491112345678']);
         expect(result.data.PORT).toBe(3000);
         expect(result.data.SESSION_PATH).toBe('./data/sessions');
-        expect(result.data.IMAGES_PATH).toBe('./data/images');
-        expect(result.data.OCR_CONCURRENCY).toBe(2);
-        expect(result.data.OCR_TIMEOUT_MS).toBe(30000);
         expect(result.data.RATE_LIMIT_MESSAGE_MS).toBe(2000);
-        expect(result.data.RATE_LIMIT_IMAGE_MS).toBe(10000);
         expect(result.data.RATE_LIMIT_DAILY_COMPRAS).toBe(30);
         expect(result.data.INACTIVITY_TIMEOUT_MIN).toBe(15);
         expect(result.data.NODE_ENV).toBe('development');
@@ -129,22 +125,16 @@ describe('env loader', () => {
       expect(result.success).toBe(false);
     });
 
-    it('coerces OCR_CONCURRENCY and RATE_LIMIT_*', () => {
+    it('coerces RATE_LIMIT_* from string', () => {
       const result = parseEnv({
         ...baseValidEnv,
-        OCR_CONCURRENCY: '4',
-        OCR_TIMEOUT_MS: '60000',
         RATE_LIMIT_MESSAGE_MS: '5000',
-        RATE_LIMIT_IMAGE_MS: '15000',
         RATE_LIMIT_DAILY_COMPRAS: '50',
         INACTIVITY_TIMEOUT_MIN: '30',
       });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.OCR_CONCURRENCY).toBe(4);
-        expect(result.data.OCR_TIMEOUT_MS).toBe(60000);
         expect(result.data.RATE_LIMIT_MESSAGE_MS).toBe(5000);
-        expect(result.data.RATE_LIMIT_IMAGE_MS).toBe(15000);
         expect(result.data.RATE_LIMIT_DAILY_COMPRAS).toBe(50);
         expect(result.data.INACTIVITY_TIMEOUT_MIN).toBe(30);
       }

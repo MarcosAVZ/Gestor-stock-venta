@@ -108,7 +108,7 @@ export const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000; // 5 min (test-friendly; pro
 export function transition(
   current: ConversationState,
   event: ConversationEvent,
-  context: TransitionContext = {},
+  _context: TransitionContext = {},
 ): TransitionResult {
   // CANCELAR / MENU / TIMEOUT aplican desde cualquier estado.
   if (event.type === 'CANCELAR') {

@@ -18,13 +18,11 @@
  *
  * INPUT (DatosTemporales):
  * El state machine va acumulando en Conversacion.datosTemporales:
- *   - producto: string (lowercase, trim) — PR3 ValidateOCRData
- *   - costoLote: number — PR3 ValidateOCRData (o `costoIngresado` si
- *     el usuario corrigió manualmente en PR5)
- *   - cantidadIngresada: number — PR5 (o `cantidadSugerida` del OCR)
- *   - unidadIngresada: Unidad — PR5 (o `unidadSugerida` del OCR)
- *   - precioVenta: number — PR5
- *   - imagenOriginal?: string — path a la imagen (si vino por OCR)
+ *   - producto: string (lowercase, trim)
+ *   - costoLote: number
+ *   - cantidadIngresada: number (or cantidadSugerida from previous step)
+ *   - unidadIngresada: Unidad (or unidadSugerida from previous step)
+ *   - precioVenta: number
  *
  * FLUJO:
  * 1. Extrae y valida con Zod los datos requeridos de datosTemporales.
@@ -33,7 +31,7 @@
  * 4. Crea el ItemCompra con las métricas (itemCompraRepo.createMany).
  * 5. Retorna la compra persistida (con su id y los items) para que el
  *    caller pueda loggear y el state machine haga el reset a
- *    ESPERANDO_IMAGEN.
+ *    PREGUNTANDO_PRODUCTO.
  *
  * DECISIONES:
  * - Si falta cualquier campo requerido, lanzamos InvariantViolationError

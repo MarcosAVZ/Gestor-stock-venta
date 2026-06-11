@@ -86,20 +86,14 @@ export const envSchema = z.object({
   /** Directorio donde whatsapp-web.js persiste la sesión. */
   SESSION_PATH: z.string().min(1).default('./data/sessions'),
 
-  /** Directorio donde se guardan las imágenes descargadas. */
-  IMAGES_PATH: z.string().min(1).default('./data/images'),
 
-  /** Concurrencia del pool OCR. */
-  OCR_CONCURRENCY: z.coerce.number().int().min(1).max(16).default(2),
 
-  /** Timeout por imagen OCR (ms). */
-  OCR_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(30000),
+
 
   /** Rate limit: ms mínimos entre mensajes de texto. */
   RATE_LIMIT_MESSAGE_MS: z.coerce.number().int().min(0).max(60000).default(2000),
 
-  /** Rate limit: ms mínimos entre imágenes. */
-  RATE_LIMIT_IMAGE_MS: z.coerce.number().int().min(0).max(60000).default(10000),
+
 
   /** Rate limit: máximo de compras por día por usuario. */
   RATE_LIMIT_DAILY_COMPRAS: z.coerce.number().int().min(1).max(10000).default(30),
