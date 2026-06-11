@@ -20,11 +20,10 @@ import { saveCompra } from '../../src/application/conversation/SaveCompra.ts';
 
 function buildMockCompraRepo() {
   return {
-    create: vi.fn(async (data: { usuarioId: string; imagenOriginal?: string }) => ({
+    create: vi.fn(async (data: { usuarioId: string }) => ({
       id: 'compra-test-1',
       usuarioId: data.usuarioId,
       fecha: new Date('2026-06-02T12:00:00Z'),
-      imagenOriginal: data.imagenOriginal ?? null,
       moneda: 'ARS' as const,
     } as Compra)),
     findById: vi.fn(),
@@ -177,19 +176,18 @@ describe('saveCompra', () => {
     ).rejects.toBeInstanceOf(InvariantViolationError);
   });
 
-  it('imagenOriginal se persiste si está presente', async () => {
+  it('imagenOriginal se omite del create call', async () => {
     const compraRepo = buildMockCompraRepo();
     const itemCompraRepo = buildMockItemCompraRepo();
     await saveCompra(
       {
         usuarioId: 'user-1',
-        datos: { ...validDatos, imagenOriginal: 'data/images/2026/06/abc.jpg' },
+        datos: validDatos,
       },
       { compraRepo, itemCompraRepo },
     );
     expect(compraRepo.create).toHaveBeenCalledWith({
       usuarioId: 'user-1',
-      imagenOriginal: 'data/images/2026/06/abc.jpg',
     });
   });
 });

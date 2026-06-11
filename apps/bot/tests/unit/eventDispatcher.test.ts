@@ -1,29 +1,20 @@
 /**
- * Tests del EventDispatcher.
+ * Tests del EventDispatcher (WU4 — text-only).
  *
  * Cubrimos los paths críticos:
  *   1. Texto: pasa al use case, envía respuestas.
- *   2. Imagen: descarga buffer, persiste vía LocalImageStorage,
- *      pasa imagePath al use case, envía respuestas.
- *   3. Imagen con error de download: avisa al user, NO llama al use case.
- *   4. Imagen con error de storage: avisa al user, NO llama al use case.
- *   5. Use case lanza excepción: catch defensivo, avisa al user.
- *   6. Port.sendText falla: loggea pero NO crashea (best-effort).
- *   7. Helper `extractPhone` (unit test puro).
- *   8. processedCount incrementa correctamente.
+ *   2. Use case lanza excepción: catch defensivo, avisa al user.
+ *   3. Port.sendText falla: loggea pero NO crashea (best-effort).
+ *   4. Helper `extractPhone` (unit test puro).
+ *   5. processedCount incrementa correctamente.
  *
  * Mocks:
  *   - `port`: fake que implementa `WhatsAppMessagingPort` con in-memory maps.
- *   - `imageStorage`: fake in-memory con `save()` y `getPath()`.
  *   - `use case deps`: mocks de Logger, RateLimiter, repos, etc.
  */
 
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
 import type { Message as WAWebJSMessage } from 'whatsapp-web.js';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Logger } from 'pino';
 import { ConversationState, type Compra, type Conversacion, type ItemCompra, type Unidad } from '@compras-whatsapp/db';
 import { Decimal } from 'decimal.js';
@@ -38,7 +29,6 @@ import type { CompraRepository } from '../../src/domain/repositories/CompraRepos
 import type { ItemCompraRepository } from '../../src/domain/repositories/ItemCompraRepository.ts';
 import type { UsuarioRepository } from '../../src/domain/repositories/UsuarioRepository.ts';
 import type { RateLimiter } from '../../src/infrastructure/messaging/rateLimiter.ts';
-import { LocalImageStorage } from '../../src/infrastructure/storage/LocalImageStorage.ts';
 
 // ── Fakes ─────────────────────────────────────────────────────────
 
@@ -58,25 +48,14 @@ function silentLogger(): Logger {
 
 interface FakePort extends WhatsAppMessagingPort {
   sentTexts: Map<string, string[]>;
-  downloadCalls: Array<{ msg: WAWebJSMessage }>;
-  failNextDownload: boolean;
   failNextSend: boolean;
 }
 
 function buildFakePort(): FakePort {
   const sentTexts = new Map<string, string[]>();
-  const downloadCalls: Array<{ msg: WAWebJSMessage }> = [];
-  let failNextDownload = false;
   let failNextSend = false;
   const port: FakePort = {
     sentTexts,
-    downloadCalls,
-    get failNextDownload() {
-      return failNextDownload;
-    },
-    set failNextDownload(v: boolean) {
-      failNextDownload = v;
-    },
     get failNextSend() {
       return failNextSend;
     },
@@ -94,14 +73,7 @@ function buildFakePort(): FakePort {
       sentTexts.set(to, list);
     },
     sendImage: async () => undefined,
-    downloadMedia: async (msg) => {
-      if (failNextDownload) {
-        failNextDownload = false;
-        throw new Error('fake download failure');
-      }
-      downloadCalls.push({ msg });
-      return Buffer.from('fake-image-bytes');
-    },
+    downloadMedia: async () => Buffer.from(''),
     onIncomingMessage: () => undefined,
     destroy: async () => undefined,
     isReady: () => true,
@@ -128,7 +100,7 @@ function buildMockConversacionRepo(
     update: vi.fn(async (id, patch) => ({
       id,
       usuarioId: 'u-1',
-      estado: patch.estado ?? ConversationState.ESPERANDO_IMAGEN,
+      estado: patch.estado ?? ConversationState.PREGUNTANDO_PRODUCTO,
       datosTemporales: patch.datosTemporales ?? {},
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -150,9 +122,9 @@ function buildMockUsuarioRepo(phone: string): UsuarioRepository {
 
 function buildMockRateLimiter(): RateLimiter {
   return {
-    canSendMessage: () => true,
-    canSendImage: () => true,
-    canSaveCompra: () => true,
+    canSendMessage: () => ({ allowed: true, retryAfterSec: 0 }),
+    canSendImage: () => ({ allowed: true, retryAfterSec: 0 }),
+    canSaveCompra: () => ({ allowed: true, retryAfterSec: 0 }),
     recordMessage: () => undefined,
     recordImage: () => undefined,
     recordCompra: () => undefined,
@@ -161,11 +133,9 @@ function buildMockRateLimiter(): RateLimiter {
   } as unknown as RateLimiter;
 }
 
-function buildDeps(port: WhatsAppMessagingPort, imageStorage: LocalImageStorage) {
+function buildDeps(port: WhatsAppMessagingPort) {
   return {
     port,
-    config: {},
-    imageStorage,
     logger: silentLogger(),
     rateLimiter: buildMockRateLimiter(),
     conversacionRepo: buildMockConversacionRepo(null),
@@ -193,7 +163,6 @@ function buildMockCompraRepo(): CompraRepository {
       id: 'compra-mock',
       usuarioId: data.usuarioId,
       fecha: new Date(),
-      imagenOriginal: data.imagenOriginal ?? null,
       moneda: 'ARS' as const,
     } as Compra)),
     findById: vi.fn(),
@@ -264,85 +233,30 @@ describe('extractPhone', () => {
 // ── Tests del dispatcher ──────────────────────────────────────────
 
 describe('EventDispatcher', () => {
-  let tmpDir: string;
-  let imageStorage: LocalImageStorage;
-  beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), 'dispatcher-'));
-    imageStorage = new LocalImageStorage({ rootPath: tmpDir, logger: silentLogger() });
-  });
-  afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
-  });
-
   it('text message: passes body to use case, sends response', async () => {
     const port = buildFakePort();
-    const deps = buildDeps(port, imageStorage);
+    const deps = buildDeps(port);
     const { handle } = buildEventDispatcher(deps);
 
-    // Re-mock use case deps to capture the input.
-    const inputCapture: Array<unknown> = [];
     deps.conversacionRepo.findByUsuarioId = vi.fn(async () => ({
       id: 'conv-1',
       usuarioId: 'u-1',
-      estado: ConversationState.ESPERANDO_IMAGEN,
+      estado: ConversationState.PREGUNTANDO_PRODUCTO,
       datosTemporales: {},
       createdAt: new Date(),
       updatedAt: new Date(),
     } satisfies Conversacion));
 
-    // We spy on the use case indirectly by checking sendText side-effect.
     await handle(buildIncoming({ type: 'text', body: 'hola' }));
 
     expect(port.sentTexts.get('5491112345678@c.us')?.length ?? 0).toBeGreaterThan(0);
-    // No se descargó media
-    expect(port.downloadCalls.length).toBe(0);
-    expect(inputCapture.length).toBe(0); // no captura acá, pero verificamos side effect
-  });
-
-  it('image message: downloads buffer, persists via imageStorage, passes imagePath to use case', async () => {
-    const port = buildFakePort();
-    const deps = buildDeps(port, imageStorage);
-    const { handle } = buildEventDispatcher(deps);
-
-    deps.conversacionRepo.findByUsuarioId = vi.fn(async () => ({
-      id: 'conv-1',
-      usuarioId: 'u-1',
-      estado: ConversationState.ESPERANDO_IMAGEN,
-      datosTemporales: {},
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    } satisfies Conversacion));
-
-    await handle(buildIncoming({ type: 'image', hasMedia: true, body: undefined }));
-
-    expect(port.downloadCalls.length).toBe(1);
-    // El archivo persistido debe estar en `<tmpDir>/<phone>/<file>.jpg`
-    const dir = join(tmpDir, '5491112345678');
-    const files = await readdir(dir);
-    expect(files).toHaveLength(1);
-    expect(files[0]).toMatch(/\.jpg$/);
-  });
-
-  it('image download failure: sends apology, does NOT call use case', async () => {
-    const port = buildFakePort();
-    port.failNextDownload = true;
-    const deps = buildDeps(port, imageStorage);
-    const { handle } = buildEventDispatcher(deps);
-
-    const findByUsuarioIdSpy = vi.spyOn(deps.conversacionRepo, 'findByUsuarioId');
-    await handle(buildIncoming({ type: 'image', hasMedia: true }));
-
-    expect(findByUsuarioIdSpy).not.toHaveBeenCalled();
-    const sent = port.sentTexts.get('5491112345678@c.us') ?? [];
-    expect(sent.some((s) => s.includes('foto'))).toBe(true);
   });
 
   it('use case throws: catch defensivo, sends apology, does NOT propagate', async () => {
     const port = buildFakePort();
-    const deps = buildDeps(port, imageStorage);
+    const deps = buildDeps(port);
     const { handle } = buildEventDispatcher(deps);
 
-    // Forzamos un throw re-mockeando findByUsuarioId para que lance.
     deps.conversacionRepo.findByUsuarioId = vi.fn(async () => {
       throw new Error('Prisma down');
     });
@@ -354,11 +268,11 @@ describe('EventDispatcher', () => {
 
   it('port.sendText fails: continues to next response, does NOT crash', async () => {
     const port = buildFakePort();
-    const deps = buildDeps(port, imageStorage);
+    const deps = buildDeps(port);
     deps.conversacionRepo.findByUsuarioId = vi.fn(async () => ({
       id: 'conv-1',
       usuarioId: 'u-1',
-      estado: ConversationState.ESPERANDO_IMAGEN,
+      estado: ConversationState.PREGUNTANDO_PRODUCTO,
       datosTemporales: {},
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -367,17 +281,16 @@ describe('EventDispatcher', () => {
     const { handle } = buildEventDispatcher(deps);
     port.failNextSend = true;
 
-    // No throw: aunque sendText falle, el handler resuelve.
     await expect(handle(buildIncoming({ type: 'text', body: 'x' }))).resolves.toBeUndefined();
   });
 
   it('processed() counter increments per call', async () => {
     const port = buildFakePort();
-    const deps = buildDeps(port, imageStorage);
+    const deps = buildDeps(port);
     deps.conversacionRepo.findByUsuarioId = vi.fn(async () => ({
       id: 'conv-1',
       usuarioId: 'u-1',
-      estado: ConversationState.ESPERANDO_IMAGEN,
+      estado: ConversationState.PREGUNTANDO_PRODUCTO,
       datosTemporales: {},
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -390,13 +303,13 @@ describe('EventDispatcher', () => {
     expect(dispatcher.processed()).toBe(2);
   });
 
-  it('text message with no body (image text fallback): passes empty string', async () => {
+  it('text message with no body: passes empty string', async () => {
     const port = buildFakePort();
-    const deps = buildDeps(port, imageStorage);
+    const deps = buildDeps(port);
     deps.conversacionRepo.findByUsuarioId = vi.fn(async () => ({
       id: 'conv-1',
       usuarioId: 'u-1',
-      estado: ConversationState.ESPERANDO_IMAGEN,
+      estado: ConversationState.PREGUNTANDO_PRODUCTO,
       datosTemporales: {},
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -404,7 +317,6 @@ describe('EventDispatcher', () => {
 
     const { handle } = buildEventDispatcher(deps);
     await handle(buildIncoming({ type: 'text', body: undefined }));
-    // Resuelve sin throw, el use case maneja el body vacío
     expect(port.sentTexts.has('5491112345678@c.us')).toBe(true);
   });
 });

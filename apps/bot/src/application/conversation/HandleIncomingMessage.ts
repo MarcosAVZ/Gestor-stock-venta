@@ -42,6 +42,7 @@ import type { ConversacionRepository } from '../../domain/repositories/Conversac
 import type { CompraRepository } from '../../domain/repositories/CompraRepository.ts';
 import type { ItemCompraRepository } from '../../domain/repositories/ItemCompraRepository.ts';
 import type { UsuarioRepository } from '../../domain/repositories/UsuarioRepository.ts';
+import { parseCommand, type BotCommand } from '../commands/parseCommand.ts';
 import { saveCompra, type DatosParaGuardar } from './SaveCompra.ts';
 import {
   executeQuery,
@@ -54,8 +55,7 @@ import {
 // ── Input ───────────────────────────────────────────────────────────
 
 export type IncomingMessageInput =
-  | { phone: string; type: 'text'; body: string }
-  | { phone: string; type: 'image'; imagePath: string };
+  | { phone: string; type: 'text'; body: string };
 
 // ── Output ──────────────────────────────────────────────────────────
 
@@ -108,7 +108,6 @@ export async function handleIncomingMessage(
   const inactivityMs = deps.inactivityTimeoutMs ?? INACTIVITY_TIMEOUT_MS;
 
   // ── 1. Whitelist ────────────────────────────────────────────────
-  // El phone que llega puede tener o no el +. Normalizamos.
   const normalizedPhone = input.phone.startsWith('+') ? input.phone : `+${input.phone}`;
 
   if (!whitelist.has(normalizedPhone)) {
@@ -116,37 +115,22 @@ export async function handleIncomingMessage(
     throw new UnauthorizedError({ metadata: { from: normalizedPhone } });
   }
 
-  // ── 2. Rate limit ──────────────────────────────────────────────
-  if (input.type === 'image') {
-    const verdict = rateLimiter.canSendImage(normalizedPhone, now);
-    if (!verdict.allowed) {
-      logSecurityEvent(logger, 'rate_limit_hit', {
-        phone: normalizedPhone,
-        type: 'image_burst',
-        retryAfterSec: verdict.retryAfterSec,
-      });
-      throw new RateLimitError('Espera un momento antes de enviar otra imagen, por favor.', {
-        retryAfterSec: verdict.retryAfterSec,
-      });
-    }
-  } else {
-    const verdict = rateLimiter.canSendMessage(normalizedPhone, now);
-    if (!verdict.allowed) {
-      logSecurityEvent(logger, 'rate_limit_hit', {
-        phone: normalizedPhone,
-        type: 'message_burst',
-        retryAfterSec: verdict.retryAfterSec,
-      });
-      throw new RateLimitError('Esperá un instante antes de mandarme otro mensaje.', {
-        retryAfterSec: verdict.retryAfterSec,
-      });
-    }
+  // ── 2. Rate limit (text only) ──────────────────────────────────
+  const verdict = rateLimiter.canSendMessage(normalizedPhone, now);
+  if (!verdict.allowed) {
+    logSecurityEvent(logger, 'rate_limit_hit', {
+      phone: normalizedPhone,
+      type: 'message_burst',
+      retryAfterSec: verdict.retryAfterSec,
+    });
+    throw new RateLimitError('Esperá un instante antes de mandarme otro mensaje.', {
+      retryAfterSec: verdict.retryAfterSec,
+    });
   }
 
   // ── 3. Usuario + Conversacion ──────────────────────────────────
   const usuario = await usuarioRepo.findByTelefono(normalizedPhone);
   if (usuario === null) {
-    // Auto-crear el primer usuario (MVP: single-tenant, el dueño).
     await usuarioRepo.create({ telefono: normalizedPhone });
   }
   const usuarioId = usuario?.id ?? (await usuarioRepo.findByTelefono(normalizedPhone))?.id;
@@ -158,7 +142,7 @@ export async function handleIncomingMessage(
   if (conversacion === null) {
     conversacion = await conversacionRepo.upsert({
       usuarioId,
-      estado: ConversationState.ESPERANDO_IMAGEN,
+      estado: ConversationState.PREGUNTANDO_PRODUCTO,
       datosTemporales: {},
     });
   }
@@ -169,86 +153,120 @@ export async function handleIncomingMessage(
     ...(conversacion.datosTemporales as Record<string, unknown> | null ?? {}),
   };
 
-  if (workingState !== ConversationState.ESPERANDO_IMAGEN && isInactivo(conversacion.updatedAt, now)) {
+  if (isInactivo(conversacion.updatedAt, now)) {
     logger.info(
       { event: 'conversation_inactivity_reset', previousState: workingState, inactivityMs },
       'conversation reset by inactivity',
     );
-    workingState = ConversationState.ESPERANDO_IMAGEN;
+    workingState = ConversationState.PREGUNTANDO_PRODUCTO;
     workingDatos = {};
   }
 
-  // ── 5. Command dispatcher (PR5 task 5.7) ─────────────────────
-  // Si el input es texto y matchea un comando de query (resumen,
-  // stock, etc.), lo ejecutamos y devolvemos el resultado SIN
-  // pasar por el state machine. Esto permite usar queries en
-  // CUALQUIER estado — incluso a mitad de una conversación de
-  // carga. Si no matchea, sigue al state machine.
-  if (input.type === 'text') {
-    const queryCmd = parseQueryCommand(input.body);
-    if (queryCmd !== null) {
-      logger.info(
-        { event: 'query_executed', cmd: queryCmd.type, phone: normalizedPhone },
-        'query dispatched',
-      );
-      const response = await executeQuery(queryCmd, usuarioId, queryDeps);
-      rateLimiter.recordMessage(normalizedPhone, now);
-      return {
-        responses: [response],
-        newState: workingState,
-        rejected: false,
-      };
-    }
-    // Texto libre: si no matchea ningún comando de query Y no es
-    // un evento del state machine, devolvemos el mensaje de ayuda
-    // y loggeamos como security event (OWASP A09).
-    const mapping = inputToEvent(input, workingState);
-    if (mapping === null) {
-      logUnknownCommand(logger, input.body);
-      return {
-        responses: [UNKNOWN_COMMAND_MESSAGE],
-        newState: workingState,
-        rejected: false,
-      };
-    }
-    const { event, datosPatch } = mapping;
-    workingDatos = { ...workingDatos, ...datosPatch };
-    const result = await runStateMachine({
-      input,
-      workingState,
-      workingDatos,
-      usuarioId,
-      event,
-      deps,
-    });
+  // ── 5. Command dispatch (priority order) ──────────────────────
+  // 5a. Slash commands (/nueva, /agregar, /ayuda) — highest priority
+  const slashCmd = parseCommand(input.body);
+  if (slashCmd !== null) {
+    const slashResult = await handleSlashCommand(slashCmd, usuarioId, workingState, deps);
     rateLimiter.recordMessage(normalizedPhone, now);
-    return result;
+    return slashResult;
   }
 
-  // ── 6. Imagen: va directo al state machine ───────────────────
+  // 5b. Query commands (resumen, stock, etc.) — second priority
+  const queryCmd = parseQueryCommand(input.body);
+  if (queryCmd !== null) {
+    logger.info(
+      { event: 'query_executed', cmd: queryCmd.type, phone: normalizedPhone },
+      'query dispatched',
+    );
+    const response = await executeQuery(queryCmd, usuarioId, queryDeps);
+    rateLimiter.recordMessage(normalizedPhone, now);
+    return {
+      responses: [response],
+      newState: workingState,
+      rejected: false,
+    };
+  }
+
+  // 5c. Free text → state machine
+  const mapping = inputToEvent(input, workingState);
+  if (mapping === null) {
+    logUnknownCommand(logger, input.body);
+    return {
+      responses: [UNKNOWN_COMMAND_MESSAGE],
+      newState: workingState,
+      rejected: false,
+    };
+  }
+  const { event, datosPatch } = mapping;
+  workingDatos = { ...workingDatos, ...datosPatch };
   const result = await runStateMachine({
     input,
     workingState,
     workingDatos,
     usuarioId,
-    event: { type: 'IMAGEN_RECIBIDA' },
+    event,
     deps,
   });
-
-  // ── 7. Record rate limit slot AFTER successful processing ──────
-  if (input.type === 'image') {
-    rateLimiter.recordImage(normalizedPhone, now);
-  } else {
-    rateLimiter.recordMessage(normalizedPhone, now);
-  }
-
+  rateLimiter.recordMessage(normalizedPhone, now);
   return result;
 }
 
 /**
- * Ejecuta el state machine + dispatch de acciones (PEDIR_*, GUARDAR, etc.).
- * Es un helper interno que evita duplicación entre el path de texto
- * y el path de imagen.
+ * Handles slash commands (/nueva, /agregar, /ayuda).
+ * Returns the response without going through the state machine.
+ */
+async function handleSlashCommand(
+  cmd: BotCommand,
+  usuarioId: string,
+  workingState: ConversationState,
+  deps: HandleIncomingMessageDeps,
+): Promise<HandleIncomingMessageOutput> {
+  const { conversacionRepo } = deps;
+
+  switch (cmd.type) {
+    case 'nueva': {
+      // Set state to PREGUNTANDO_PRODUCTO and ask for product
+      await conversacionRepo.update(usuarioId, {
+        estado: ConversationState.PREGUNTANDO_PRODUCTO,
+        datosTemporales: {},
+      });
+      return {
+        responses: ['¿Qué producto compraste?'],
+        newState: ConversationState.PREGUNTANDO_PRODUCTO,
+        rejected: false,
+      };
+    }
+    case 'agregar': {
+      // Set state to AGREGANDO_STOCK
+      await conversacionRepo.update(usuarioId, {
+        estado: ConversationState.AGREGANDO_STOCK,
+        datosTemporales: {},
+      });
+      return {
+        responses: ['Seleccioná un producto de la lista.'],
+        newState: ConversationState.AGREGANDO_STOCK,
+        rejected: false,
+      };
+    }
+    case 'ayuda': {
+      // Return help text, no state change
+      return {
+        responses: [
+          'Comandos disponibles:\n' +
+          '/nueva — cargar una nueva compra\n' +
+          '/agregar — agregar stock a un producto existente\n' +
+          '/ayuda — ver esta ayuda\n\n' +
+          'Consultas: resumen, estadisticas, ganancias, productos, stock, producto <nombre>, compras mes, top ganancias.',
+        ],
+        newState: workingState,
+        rejected: false,
+      };
+    }
+  }
+}
+
+/**
+ * Executes the state machine + action dispatch (PEDIR_*, GUARDAR, etc.).
  */
 async function runStateMachine(params: {
   input: IncomingMessageInput;
@@ -261,8 +279,8 @@ async function runStateMachine(params: {
   const { input, workingState, workingDatos, usuarioId, event, deps } = params;
   const { logger, conversacionRepo, compraRepo, itemCompraRepo } = deps;
 
-  // ── 7. State machine ───────────────────────────────────────────
-  const context = buildContext(workingDatos, event);
+  // ── State machine ──────────────────────────────────────────────
+  const context = buildContext(workingDatos);
   const result: TransitionResult = transition(workingState, event, context);
 
   if (!result.ok) {
@@ -277,7 +295,7 @@ async function runStateMachine(params: {
     };
   }
 
-  // ── 8. Persistir si la acción es GUARDAR (PR5 task 5.5) ────────
+  // ── Persist if action is GUARDAR ───────────────────────────────
   if (result.accion.tipo === 'GUARDAR') {
     const datosParaGuardar: DatosParaGuardar = workingDatos as unknown as DatosParaGuardar;
     try {
@@ -313,12 +331,12 @@ async function runStateMachine(params: {
     }
   }
 
-  // ── 9. Render responses desde la Accion ────────────────────────
-  const responses = renderAccion(result.accion, workingDatos, input);
+  // ── Render responses from Accion ───────────────────────────────
+  const responses = renderAccion(result.accion, workingDatos);
 
-  // ── 10. Persistir nuevo estado si cambió ───────────────────────
+  // ── Persist new state if changed ───────────────────────────────
   if (result.siguiente !== workingState) {
-    const newDatos = applyAccionToDatos(workingDatos, result.accion, input);
+    const newDatos = applyAccionToDatos(workingDatos, result.accion);
     await conversacionRepo.update(usuarioId, {
       estado: result.siguiente,
       datosTemporales: newDatos,
@@ -335,40 +353,31 @@ async function runStateMachine(params: {
 // ── Helpers ─────────────────────────────────────────────────────────
 
 /**
- * Mapea el input del bot a un ConversationEvent. Si el input no
- * encaja en ningún evento del state machine (ej: un comando de query
- * en PR5), retorna `null` y el caller responde genérico.
- *
- * Retorna además un `datosPatch` con los valores ingresados por el
- * usuario (cantidad, unidad, precioVenta, costoLote manual) que el
- * orquestador aplica a `datosTemporales` ANTES de la transición. Esto
- * permite que el state machine + GUARDAR tengan los datos persistidos
- * cuando llegue el momento de saveCompra (PR5 task 5.5).
+ * Maps input to a ConversationEvent. Returns null if input doesn't
+ * match any event for the current state.
  */
 function inputToEvent(
   input: IncomingMessageInput,
   state: ConversationState,
 ): { event: ConversationEvent; datosPatch: Record<string, unknown> } | null {
-  if (input.type === 'image') {
-    return { event: { type: 'IMAGEN_RECIBIDA' }, datosPatch: {} };
-  }
-
   const text = input.body.trim();
   const lower = text.toLowerCase();
 
-  // Comandos globales disponibles desde cualquier estado.
+  // Global commands available from any state
   if (lower === 'cancelar' || lower === 'cancel') return { event: { type: 'CANCELAR' }, datosPatch: {} };
   if (lower === 'menu' || lower === 'menú' || lower === 'empezar') return { event: { type: 'MENU' }, datosPatch: {} };
 
-  // En ESPERANDO_IMAGEN, texto no es nada procesable por ahora
-  // (los comandos de query llegan en PR5). Respondemos con null y
-  // el handler manda un mensaje genérico.
-  if (state === ConversationState.ESPERANDO_IMAGEN) {
-    return null;
+  // PREGUNTANDO_PRODUCTO: any text → PRODUCTO_RECIBIDO
+  if (state === ConversationState.PREGUNTANDO_PRODUCTO) {
+    if (text.length > 0) {
+      return {
+        event: { type: 'PRODUCTO_RECIBIDO', valor: text.toLowerCase() },
+        datosPatch: { producto: text.toLowerCase() },
+      };
+    }
   }
 
-  // YES/NO (PR5: usa el schema Zod `opcionSiNoSchema` que ya mapea
-  // "si/sí/s/yes/y/ok/dale/1" → "si" y "no/n/mal/incorrecto/2" → "no").
+  // YES/NO for CONFIRMACION_FINAL
   const siNo = opcionSiNoSchema.safeParse(lower);
   if (siNo.success) {
     return {
@@ -376,12 +385,8 @@ function inputToEvent(
       datosPatch: {},
     };
   }
-  if (lower === 'corregir' || lower.startsWith('cambiar ')) {
-    const campo = lower.startsWith('cambiar ') ? text.slice(8) : 'general';
-    return { event: { type: 'USUARIO_CORRIGE', campo }, datosPatch: {} };
-  }
 
-  // NUMERIC INPUTS (PR5: usa los schemas Zod de shared).
+  // PREGUNTANDO_CANTIDAD: number → CANTIDAD_RECIBIDA
   if (state === ConversationState.PREGUNTANDO_CANTIDAD) {
     const parsed = cantidadSchema.safeParse(Number(text));
     if (parsed.success) {
@@ -391,20 +396,8 @@ function inputToEvent(
       };
     }
   }
-  if (state === ConversationState.PREGUNTANDO_PRECIO_VENTA) {
-    // `precioSchema` acepta string ARS con prefijos/separadores, lo
-    // que evita que el usuario tenga que tipear `1234.5` o `1234,5`
-    // a mano — aceptamos `$1.500`, `AR$ 1.500,00`, etc.
-    const parsed = precioSchema.safeParse(text);
-    if (parsed.success) {
-      return {
-        event: { type: 'PRECIO_RECIBIDO', valor: parsed.data },
-        datosPatch: { precioVenta: parsed.data },
-      };
-    }
-  }
 
-  // UNIDAD (PR5: usa el schema Zod `opcionUnidadSchema`).
+  // PREGUNTANDO_UNIDAD: text → UNIDAD_RECIBIDA
   if (state === ConversationState.PREGUNTANDO_UNIDAD) {
     const parsed = opcionUnidadSchema.safeParse(lower);
     if (parsed.success) {
@@ -415,58 +408,81 @@ function inputToEvent(
     }
   }
 
+  // PREGUNTANDO_COSTO_LOTE: number → COSTO_LOTE_RECIBIDO
+  if (state === ConversationState.PREGUNTANDO_COSTO_LOTE) {
+    const parsed = precioSchema.safeParse(text);
+    if (parsed.success) {
+      return {
+        event: { type: 'COSTO_LOTE_RECIBIDO', valor: parsed.data },
+        datosPatch: { costoLote: parsed.data },
+      };
+    }
+  }
+
+  // PREGUNTANDO_PRECIO_VENTA: number → PRECIO_RECIBIDO
+  if (state === ConversationState.PREGUNTANDO_PRECIO_VENTA) {
+    const parsed = precioSchema.safeParse(text);
+    if (parsed.success) {
+      return {
+        event: { type: 'PRECIO_RECIBIDO', valor: parsed.data },
+        datosPatch: { precioVenta: parsed.data },
+      };
+    }
+  }
+
+  // AGREGANDO_STOCK: number → SELECCIONAR_PRODUCTO
+  if (state === ConversationState.AGREGANDO_STOCK) {
+    const num = Number(text);
+    if (!isNaN(num) && num > 0 && Number.isInteger(num)) {
+      return {
+        event: { type: 'SELECCIONAR_PRODUCTO', indice: num },
+        datosPatch: { productoIndice: num },
+      };
+    }
+  }
+
   return null;
 }
 
-/** Construye el contexto del state machine desde los datosTemporales. */
+/** Builds the state machine context from datosTemporales. */
 function buildContext(
   datos: Record<string, unknown>,
-  _event: ConversationEvent,
 ): {
-  productoDetectado?: string;
-  costoLoteDetectado?: number;
-  cantidadSugerida?: number;
-  unidadSugerida?: Unidad;
+  productosDisponibles?: Array<{ indice: number; nombre: string; costoLote: number; precioVenta: number }>;
 } {
   return {
-    productoDetectado: typeof datos['producto'] === 'string' ? (datos['producto'] as string) : undefined,
-    costoLoteDetectado: typeof datos['costoLote'] === 'number' ? (datos['costoLote'] as number) : undefined,
-    cantidadSugerida: typeof datos['cantidadSugerida'] === 'number' ? (datos['cantidadSugerida'] as number) : undefined,
-    unidadSugerida: typeof datos['unidadSugerida'] === 'string' ? (datos['unidadSugerida'] as Unidad) : undefined,
+    productosDisponibles: Array.isArray(datos['productosDisponibles'])
+      ? (datos['productosDisponibles'] as Array<{ indice: number; nombre: string; costoLote: number; precioVenta: number }>)
+      : undefined,
   };
 }
 
-/** Genera el texto voseo de cada acción para enviar al usuario. */
+/** Generates voseo text for each action to send to the user. */
 function renderAccion(
   accion:
-    | { tipo: 'DISPARAR_OCR' }
-    | { tipo: 'PEDIR_CONFIRMACION'; producto: string; costoLote: number }
+    | { tipo: 'PEDIR_PRODUCTO' }
     | { tipo: 'PEDIR_CANTIDAD' }
     | { tipo: 'PEDIR_UNIDAD' }
+    | { tipo: 'PEDIR_COSTO_LOTE' }
     | { tipo: 'PEDIR_PRECIO_VENTA' }
     | { tipo: 'MOSTRAR_RESUMEN'; resumen: string }
     | { tipo: 'GUARDAR' }
-    | { tipo: 'RESET'; mensaje: string },
+    | { tipo: 'RESET'; mensaje: string }
+    | { tipo: 'LISTAR_PRODUCTOS'; productos: Array<{ indice: number; nombre: string }> },
   datos: Record<string, unknown>,
-  input: IncomingMessageInput,
 ): string[] {
   switch (accion.tipo) {
-    case 'DISPARAR_OCR':
-      // El OCR es asíncrono (PR4). Por ahora mandamos un ack.
-      return ['Procesando la imagen, dame un toque...'];
-    case 'PEDIR_CONFIRMACION':
-      return [
-        `Detecté: ${accion.producto}, costo lote $${accion.costoLote}. ¿Es correcto? (sí/no/corregir)`,
-      ];
+    case 'PEDIR_PRODUCTO':
+      return ['¿Qué producto compraste?'];
     case 'PEDIR_CANTIDAD':
       return ['¿Cuántas unidades compraste?'];
     case 'PEDIR_UNIDAD':
       return ['¿En qué unidad? (unidad/par/pack/caja/otro)'];
+    case 'PEDIR_COSTO_LOTE':
+      return ['¿Cuánto te costó el lote? (precio en pesos)'];
     case 'PEDIR_PRECIO_VENTA': {
-      // Si tenemos cantidad + unidad (de learning o ingreso previo),
-      // las mencionamos en el prompt.
-      const cant = datos['cantidadIngresada'] ?? datos['cantidadSugerida'];
-      const unid = datos['unidadIngresada'] ?? datos['unidadSugerida'];
+      const cant = datos['cantidadIngresada'];
+      const unid = datos['unidadIngresada'];
       if (cant !== undefined && unid !== undefined) {
         return [`OK, ${cant} ${String(unid).toLowerCase()}. ¿A cuánto vendés cada una?`];
       }
@@ -474,8 +490,8 @@ function renderAccion(
     }
     case 'MOSTRAR_RESUMEN': {
       const producto = String(datos['producto'] ?? '?');
-      const cant = datos['cantidadIngresada'] ?? datos['cantidadSugerida'];
-      const unid = datos['unidadIngresada'] ?? datos['unidadSugerida'];
+      const cant = datos['cantidadIngresada'];
+      const unid = datos['unidadIngresada'];
       const costoU = datos['costoUnitario'] ?? 0;
       const precioVenta = datos['precioVenta'] ?? 0;
       const gananciaU = Number(precioVenta) - Number(costoU);
@@ -485,45 +501,39 @@ function renderAccion(
           `ganancia $${gananciaU.toFixed(2)} c/u. ¿Guardo? (sí/no)`,
       ];
     }
-    case 'GUARDAR': {
-      if (input.type === 'image') {
-        return ['¡Listo, guardé la compra! Mandame la próxima cuando quieras.'];
-      }
+    case 'GUARDAR':
       return ['¡Listo, guardé la compra!'];
-    }
     case 'RESET':
       return [accion.mensaje];
+    case 'LISTAR_PRODUCTOS': {
+      if (accion.productos.length === 0) {
+        return ['No tenés productos cargados. Usá /nueva para empezar.'];
+      }
+      const lines = accion.productos.map((p) => `${p.indice}. ${p.nombre}`);
+      return [`Seleccioná un producto:\n${lines.join('\n')}`];
+    }
   }
 }
 
-/** Aplica el side effect de la acción a los datosTemporales. */
+/** Applies the action's side effect to datosTemporales. */
 function applyAccionToDatos(
   datos: Record<string, unknown>,
   accion:
-    | { tipo: 'DISPARAR_OCR' }
-    | { tipo: 'PEDIR_CONFIRMACION'; producto: string; costoLote: number }
+    | { tipo: 'PEDIR_PRODUCTO' }
     | { tipo: 'PEDIR_CANTIDAD' }
     | { tipo: 'PEDIR_UNIDAD' }
+    | { tipo: 'PEDIR_COSTO_LOTE' }
     | { tipo: 'PEDIR_PRECIO_VENTA' }
     | { tipo: 'MOSTRAR_RESUMEN'; resumen: string }
     | { tipo: 'GUARDAR' }
-    | { tipo: 'RESET'; mensaje: string },
-  _input: IncomingMessageInput,
+    | { tipo: 'RESET'; mensaje: string }
+    | { tipo: 'LISTAR_PRODUCTOS'; productos: Array<{ indice: number; nombre: string }> },
 ): Record<string, unknown> {
-  // Por ahora la mayoria de las acciones no mutan datos. Los precios
-  // y cantidades se persisten en PRECIO_RECIBIDO y CANTIDAD_RECIBIDA
-  // (manejados por el caller via datosTemporales). El state machine
-  // puro no sabe de input values; el orquestador los inyecta ANTES
-  // de llamar transition(). Ver PR5 task 5.4 para el detail.
   switch (accion.tipo) {
     case 'RESET':
       return {};
-    case 'DISPARAR_OCR':
-      return { ...datos, awaitingOCR: true };
-    case 'PEDIR_CONFIRMACION':
-      return { ...datos, producto: accion.producto, costoLote: accion.costoLote };
     case 'MOSTRAR_RESUMEN':
-      return datos; // el precioVenta se setea en PRECIO_RECIBIDO (caller)
+      return datos;
     default:
       return datos;
   }

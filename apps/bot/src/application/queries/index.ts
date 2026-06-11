@@ -48,7 +48,7 @@ import type { PrismaClientLike } from '../../infrastructure/persistence/PrismaCl
 type AnyLogger = Logger;
 
 /** Mensaje estándar cuando la DB está vacía para el usuario. */
-const EMPTY_DB_MESSAGE = 'Todavía no cargaste compras. Mandame una imagen para empezar.';
+const EMPTY_DB_MESSAGE = 'Todavía no cargaste compras. Usá /nueva para empezar.';
 
 /** Helper para formatear números en pesos AR (1.500, 1.500,50). */
 function fmtArs(n: number | string | { toNumber: () => number }): string {
@@ -431,7 +431,7 @@ export async function executeQuery(
 
 /** Mensaje de ayuda cuando el usuario tipea un comando desconocido. */
 export const UNKNOWN_COMMAND_MESSAGE =
-  'No entendí. Comandos: resumen, estadisticas, ganancias, productos, ' +
+  'No entendí. Comandos: /nueva, /agregar, /ayuda, resumen, estadisticas, ganancias, productos, ' +
   'stock, producto <nombre>, compras mes, top ganancias.';
 
 /** Log cuando un comando desconocido llega (OWASP A09). */

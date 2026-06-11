@@ -70,7 +70,6 @@ const datosParaGuardarSchema = z.object({
   cantidadSugerida: z.number().int().positive().optional(),
   unidadIngresada: z.nativeEnum(Unidad).optional(),
   unidadSugerida: z.nativeEnum(Unidad).optional(),
-  imagenOriginal: z.string().optional(),
 });
 
 export type DatosParaGuardar = z.infer<typeof datosParaGuardarSchema>;
@@ -156,7 +155,6 @@ export async function saveCompra(
   // 4. Crear la Compra vacía.
   const compra = await deps.compraRepo.create({
     usuarioId: input.usuarioId,
-    imagenOriginal: datos.imagenOriginal,
   });
 
   // 5. Crear el ItemCompra con las métricas (en una sola transacción
