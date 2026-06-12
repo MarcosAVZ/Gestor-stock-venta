@@ -3,7 +3,7 @@
   "version": "0.1.0-mvp",
   "private": true,
   "type": "module",
-  "description": "WhatsApp bot + Express API. Receives capturas, runs OCR, drives the conversation state machine, persists to PostgreSQL.",
+  "description": "WhatsApp bot + Express API. Receives text commands, drives the conversation state machine, persists to PostgreSQL.",
   "main": "src/index.ts",
   "scripts": {
     "build": "tsc --noEmit",
@@ -26,8 +26,7 @@
     "p-queue": "8.0.1",
     "pino": "9.5.0",
     "pino-pretty": "13.0.0",
-    "sharp": "0.34.5",
-    "tesseract.js": "7.0.0",
+
     "whatsapp-web.js": "1.27.0",
     "zod": "3.24.1"
   },

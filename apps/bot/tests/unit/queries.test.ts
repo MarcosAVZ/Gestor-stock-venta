@@ -78,7 +78,7 @@ describe('queries', () => {
   describe('getResumen', () => {
     it('DB vacía: mensaje estándar', async () => {
       const r = await getResumen('user-1', emptyDeps());
-      expect(r).toBe('Todavía no cargaste compras. Mandame una imagen para empezar.');
+      expect(r).toBe('Todavía no cargaste compras. Usá /nueva para empezar.');
     });
 
     it('mes con compras: formato "N compras, invertido $X, ganancia $Y"', async () => {
@@ -101,7 +101,7 @@ describe('queries', () => {
   describe('getEstadisticas', () => {
     it('DB vacía: mensaje estándar', async () => {
       const r = await getEstadisticas('user-1', emptyDeps());
-      expect(r).toBe('Todavía no cargaste compras. Mandame una imagen para empezar.');
+      expect(r).toBe('Todavía no cargaste compras. Usá /nueva para empezar.');
     });
 
     it('ticket promedio = totalInvertido / compras', async () => {
@@ -124,7 +124,7 @@ describe('queries', () => {
   describe('getGanancias', () => {
     it('DB vacía: mensaje estándar', async () => {
       const r = await getGanancias('user-1', emptyDeps());
-      expect(r).toBe('Todavía no cargaste compras. Mandame una imagen para empezar.');
+      expect(r).toBe('Todavía no cargaste compras. Usá /nueva para empezar.');
     });
 
     it('suma todas las gananciaTotal', async () => {
@@ -145,7 +145,7 @@ describe('queries', () => {
   describe('getProductos', () => {
     it('DB vacía: mensaje estándar', async () => {
       const r = await getProductos('user-1', emptyDeps());
-      expect(r).toBe('Todavía no cargaste compras. Mandame una imagen para empezar.');
+      expect(r).toBe('Todavía no cargaste compras. Usá /nueva para empezar.');
     });
 
     it('lista productos únicos con count', async () => {
@@ -169,7 +169,7 @@ describe('queries', () => {
   describe('getStock', () => {
     it('DB vacía: mensaje estándar', async () => {
       const r = await getStock('user-1', emptyDeps());
-      expect(r).toBe('Todavía no cargaste compras. Mandame una imagen para empezar.');
+      expect(r).toBe('Todavía no cargaste compras. Usá /nueva para empezar.');
     });
 
     it('suma cantidades por nombre de producto', async () => {
@@ -293,7 +293,7 @@ describe('queries', () => {
   describe('getTopGanancias', () => {
     it('DB vacía: mensaje estándar', async () => {
       const r = await getTopGanancias(5, emptyDeps());
-      expect(r).toBe('Todavía no cargaste compras. Mandame una imagen para empezar.');
+      expect(r).toBe('Todavía no cargaste compras. Usá /nueva para empezar.');
     });
 
     it('lista top N con índice', async () => {
@@ -343,7 +343,7 @@ describe('queries', () => {
       const cmd = parseQueryCommand('resumen');
       expect(cmd).toEqual({ type: 'resumen' });
       const r = await executeQuery(cmd!, 'user-1', deps);
-      expect(r).toBe('Todavía no cargaste compras. Mandame una imagen para empezar.');
+      expect(r).toBe('Todavía no cargaste compras. Usá /nueva para empezar.');
     });
   });
 });

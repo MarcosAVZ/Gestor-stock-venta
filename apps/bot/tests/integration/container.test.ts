@@ -33,13 +33,8 @@ function buildTestEnv(): Env {
     LOG_LEVEL: 'fatal',
     PORT: '3000',
     SESSION_PATH: './data/test-session',
-    IMAGES_PATH: './data/test-images',
     RATE_LIMIT_MESSAGE_MS: '2000',
-    RATE_LIMIT_IMAGE_MS: '10000',
     RATE_LIMIT_DAILY_COMPRAS: '30',
-    INACTIVITY_TIMEOUT_MIN: '15',
-    OCR_LANG: 'spa',
-    OCR_CONFIDENCE_THRESHOLD: '0.6',
   });
   if (!parsed.success) {
     throw new Error(`Test env invalid: ${parsed.error.message}`);

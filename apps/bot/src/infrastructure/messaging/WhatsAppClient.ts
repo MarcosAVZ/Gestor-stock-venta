@@ -68,9 +68,8 @@ export interface WhatsAppMessagingPort {
   sendImage(to: string, filePath: string, caption?: string): Promise<void>;
   /** Descarga la media de un mensaje y devuelve el buffer.
    *  PR4: el port ya NO escribe a disco — esa responsabilidad
-   *  pasó a `LocalImageStorage` (ver `infrastructure/storage/`).
    *  Beneficios: el port es simétrico, testeable con mocks
-   *  simples, y el storage tiene su propio owner. */
+   *  simples. */
   downloadMedia(msg: WAWebJSMessage): Promise<Buffer>;
   /** Registra el handler para mensajes entrantes. */
   onIncomingMessage(handler: IncomingMessageHandler): void;
@@ -175,10 +174,7 @@ export class WhatsAppWebJsAdapter implements WhatsAppMessagingPort {
 
   async downloadMedia(msg: WAWebJSMessage): Promise<Buffer> {
     this.assertReady();
-    // PR4 refactor: el port solo descarga y devuelve bytes. La
-    // persistencia a disco la hace `LocalImageStorage` (inyectado
-    // en el eventDispatcher). Esto desacopla la capa de mensajería
-    // de la capa de filesystem.
+    // El port solo descarga y devuelve bytes.
     if (typeof msg.downloadMedia === 'function') {
       const media = await msg.downloadMedia();
       return Buffer.from(media.data, 'base64');

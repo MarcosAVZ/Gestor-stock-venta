@@ -38,7 +38,7 @@ export class PrismaConversacionRepository implements ConversacionRepository {
       where: { usuarioId: data.usuarioId },
       create: {
         usuarioId: data.usuarioId,
-        estado: data.estado ?? ConversationState.ESPERANDO_IMAGEN,
+        estado: data.estado ?? ConversationState.PREGUNTANDO_PRODUCTO,
         datosTemporales: (data.datosTemporales ?? {}) as unknown as Prisma.InputJsonValue,
       },
       update: {

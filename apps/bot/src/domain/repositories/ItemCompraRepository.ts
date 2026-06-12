@@ -31,8 +31,7 @@ export interface ItemCompraRepository {
   createMany(items: NewItemCompra[]): Promise<ItemCompra[]>;
 
   /**
-   * Busca items por nombre exacto (lowercase). Usado por el parser OCR
-   * cuando el texto tiene alta confianza y se quiere lookup directo
+   * Busca items por nombre exacto (lowercase). Útil para lookup directo
    * antes que fuzzy match.
    */
   findByNombre(nombre: string): Promise<ItemCompra[]>;

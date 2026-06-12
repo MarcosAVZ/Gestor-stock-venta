@@ -14,3 +14,4 @@ export {
 } from './precio.ts';
 export { opcionUnidadSchema, type OpcionUnidad } from './opcionUnidad.ts';
 export { opcionSiNoSchema, type OpcionSiNo, SI_TEXTO, NO_TEXTO } from './opcionSiNo.ts';
+export { UnidadSchema } from './unidad.ts';

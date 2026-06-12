@@ -112,8 +112,8 @@ export function logSecurityEvent(
     | 'unhandled_rejection'
     | 'uncaught_exception'
     | 'media_downloaded'
-    | 'send_failed'
-    | 'ocr_failed',
+    | 'send_failed',
+
   metadata: Record<string, unknown> = {},
 ): void {
   // level warn para la mayoría; error para unhandled_rejection/uncaught_exception.
