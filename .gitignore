@@ -50,6 +50,12 @@ apps/bot/data/*.log
 .nyc_output/
 .vitest-cache/
 
+# WhatsApp web cache (auto-generated, never commit)
+.wwebjs_cache/
+
+# Tesseract/OCR training data (binary, generated locally)
+*.traineddata
+
 # OS
 .DS_Store
 desktop.ini
