@@ -49,4 +49,10 @@ export interface CompraRepository {
    * para que el caller pueda agregar por nombre si hace falta.
    */
   findTopByGanancias(limit: number): Promise<ItemCompra[]>;
+
+  /**
+   * Elimina todas las compras de un usuario (y sus items por cascade).
+   * Usado por el comando /eliminar.
+   */
+  deleteAllByUsuarioId(usuarioId: string): Promise<number>;
 }

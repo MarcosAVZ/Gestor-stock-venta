@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConversationState, type Compra, type Conversacion, type ItemCompra, type Unidad } from '@compras-whatsapp/db';
 import { Decimal } from 'decimal.js';
 import type { Logger } from 'pino';
+import type { IncomingMessageInput } from '../../src/application/conversation/HandleIncomingMessage.ts';
 
 import { handleIncomingMessage } from '../../src/application/conversation/HandleIncomingMessage.ts';
 import { UnauthorizedError, RateLimitError } from '../../src/domain/errors/OperationalError.ts';
@@ -195,7 +196,14 @@ describe('handleIncomingMessage (WU4 — text-command wiring)', () => {
       usuarioRepo,
       compraRepo: buildMockCompraRepo(),
       itemCompraRepo: buildMockItemCompraRepo(),
-      queryDeps: { prisma: {} as never, logger },
+      ventaRepo: { create: vi.fn(), findByUsuarioId: vi.fn(), findByProductoNombre: vi.fn(), sumIngresos: vi.fn(), sumGananciaTotal: vi.fn() } as never,
+      queryDeps: {
+        prisma: {
+          itemCompra: { findMany: vi.fn(async () => []) },
+          compra: { findMany: vi.fn(async () => []) },
+        } as never,
+        logger,
+      },
       whitelist: WHITELIST,
     };
     // Default: usuario ya existe
@@ -230,8 +238,7 @@ describe('handleIncomingMessage (WU4 — text-command wiring)', () => {
 
     it('IncomingMessageInput type only has text variant (compile-time check)', () => {
       // This is a type-level test. If the image variant exists, this won't compile.
-      const textInput: import('../../src/application/conversation/HandleIncomingMessage.ts').IncomingMessageInput =
-        { phone: '+5491111111111', type: 'text', body: 'test' };
+      const textInput: IncomingMessageInput = { phone: '+5491111111111', type: 'text', body: 'test' };
       expect(textInput.type).toBe('text');
     });
   });
@@ -323,10 +330,20 @@ describe('handleIncomingMessage (WU4 — text-command wiring)', () => {
   // ── Slash command dispatch: /agregar ────────────────────────────
 
   describe('slash command: /agregar', () => {
-    it('/agregar sets state to AGREGANDO_STOCK', async () => {
+    it('/agregar sets state to AGREGANDO_STOCK when there are products', async () => {
       conversacionRepo.findByUsuarioId.mockResolvedValue(
         makeConversacion({ estado: ConversationState.PREGUNTANDO_PRODUCTO }),
       );
+      // Mock prisma to return at least one product
+      const mockPrisma = {
+        itemCompra: {
+          findMany: vi.fn(async () => [
+            { nombre: 'medias', costoLote: 1200, precioVenta: 1500, unidad: 'PAR' },
+          ]),
+        },
+        compra: { findMany: vi.fn(async () => []) },
+      };
+      deps.queryDeps = { prisma: mockPrisma as never, logger };
       const out = await handleIncomingMessage(
         { phone: '+5491111111111', type: 'text', body: '/agregar' },
         deps,
@@ -334,7 +351,7 @@ describe('handleIncomingMessage (WU4 — text-command wiring)', () => {
       expect(out.newState).toBe(ConversationState.AGREGANDO_STOCK);
     });
 
-    it('/agregar works from any state (short-circuits)', async () => {
+    it('/agregar shows message when no products exist', async () => {
       conversacionRepo.findByUsuarioId.mockResolvedValue(
         makeConversacion({ estado: ConversationState.PREGUNTANDO_CANTIDAD }),
       );
@@ -342,7 +359,8 @@ describe('handleIncomingMessage (WU4 — text-command wiring)', () => {
         { phone: '+5491111111111', type: 'text', body: '/agregar' },
         deps,
       );
-      expect(out.newState).toBe(ConversationState.AGREGANDO_STOCK);
+      expect(out.newState).toBe(ConversationState.PREGUNTANDO_CANTIDAD);
+      expect(out.responses[0]).toMatch(/No tenés productos cargados/);
     });
   });
 

@@ -26,6 +26,18 @@ export function renderAccion(
       return ['¿En qué unidad? (unidad/par/pack/caja/otro)'];
     case 'PEDIR_COSTO_LOTE':
       return ['¿Cuánto te costó el lote? (precio en pesos)'];
+    case 'PEDIR_COSTO_LOTE_AGREGAR': {
+      const productos = datos['productosDisponibles'] as Array<{ indice: number; nombre: string; costoLote: number; precioVenta: number }> | undefined;
+      const indice = datos['productoIndice'] as number | undefined;
+      const producto = productos?.find((p) => p.indice === indice);
+      const suggestions: string[] = [];
+      if (producto !== undefined) {
+        suggestions.push(`El último costo fue $${producto.costoLote}. ¿Cuánto te costó este lote? (ingresá el nuevo costo)`);
+      } else {
+        suggestions.push('¿Cuánto te costó el lote? (precio en pesos)');
+      }
+      return suggestions;
+    }
     case 'PEDIR_PRECIO_VENTA': {
       const cant = datos['cantidadIngresada'];
       const unid = datos['unidadIngresada'];

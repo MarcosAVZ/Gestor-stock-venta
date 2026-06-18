@@ -118,20 +118,25 @@ export class WhatsAppWebJsAdapter implements WhatsAppMessagingPort {
     if (this._destroyed) {
       throw new Error('WhatsAppWebJsAdapter: cannot initialize a destroyed adapter');
     }
-    // `initialize()` no es bloqueante: el cliente se conecta en background
-    // y emite `qr` / `authenticated` / `ready` según corresponda.
-    // Esperamos el primer evento `ready` o `auth_failure` con una race.
     return new Promise<void>((resolve, reject) => {
       let settled = false;
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          this.logger.warn('initialize timeout: ready event not received after 60s');
+        }
+      }, 60_000);
       const onReady = (): void => {
         if (settled) return;
         settled = true;
+        clearTimeout(timeout);
         cleanup();
+        this.logger.info('initialize: ready event received');
         resolve();
       };
       const onAuthFailure = (msg: string): void => {
         if (settled) return;
         settled = true;
+        clearTimeout(timeout);
         cleanup();
         reject(new Error(`WhatsApp auth failure: ${msg}`));
       };
@@ -144,6 +149,7 @@ export class WhatsAppWebJsAdapter implements WhatsAppMessagingPort {
       this.client.initialize().catch((err: unknown) => {
         if (settled) return;
         settled = true;
+        clearTimeout(timeout);
         cleanup();
         reject(err instanceof Error ? err : new Error(String(err)));
       });
@@ -163,7 +169,7 @@ export class WhatsAppWebJsAdapter implements WhatsAppMessagingPort {
   async sendImage(to: string, filePath: string, caption?: string): Promise<void> {
     this.assertReady();
     const chatId = this.toChatId(to);
-    const { MessageMedia } = await import('whatsapp-web.js');
+    const { MessageMedia } = await import('whatsapp-web.js').then(m => m.default ?? m);
     const media = await MessageMedia.fromFilePath(filePath);
     await this.client.sendMessage(chatId, media, { caption: caption ?? '' });
     this.logger.info(
@@ -210,12 +216,28 @@ export class WhatsAppWebJsAdapter implements WhatsAppMessagingPort {
   // ── Privados ────────────────────────────────────────────────────
 
   private attachEventHandlers(): void {
+    // Debug: log ALL client events to diagnose ready issue.
+    const debugEvents = ['qr', 'authenticated', 'auth_failure', 'ready', 'disconnected', 'message', 'loading_screen', 'browserqa'];
+    for (const evt of debugEvents) {
+      this.client.on(evt, (...args: unknown[]) => {
+        this.logger.debug({ event: `client_${evt}`, args: args.length }, `client emitted: ${evt}`);
+      });
+    }
+
     this.client.on('qr', (qr: string) => {
       logSecurityEvent(this.logger, 'whatsapp_qr_ready', { qrLength: qr.length });
       this.logger.info(
         { event: 'whatsapp_qr', qrLength: qr.length },
         'Scan the QR code from WhatsApp > Linked Devices',
       );
+      // Print QR to terminal so the operator can scan it.
+      import('qrcode').then((qrLib) => {
+        qrLib.toString(qr, { type: 'terminal', small: true }, (err: Error | null, url: string) => {
+          if (!err) console.log(url);
+        });
+      }).catch(() => {
+        this.logger.warn('qrcode not available, QR not printed to terminal');
+      });
     });
 
     this.client.on('authenticated', () => {
@@ -258,7 +280,26 @@ export class WhatsAppWebJsAdapter implements WhatsAppMessagingPort {
       if (from.includes('@g.us')) return;
       if (from.includes('@broadcast')) return;
 
-      const phone = from.split('@')[0] ?? from;
+      // Resolve phone: WhatsApp linked devices may send @lid instead
+      // of the real phone number. Try to get the real number via contact.
+      let phone = from.split('@')[0] ?? from;
+      this.logger.debug({ from, initialPhone: phone }, 'dispatchMessage: raw from');
+      if (from.includes('@lid')) {
+        try {
+          const contact = await msg.getContact();
+          this.logger.debug(
+            { lid: from, contactNumber: contact?.number, contactId: contact?.id, contactName: contact?.name },
+            'dispatchMessage: LID contact resolved',
+          );
+          if (contact?.number) {
+            phone = contact.number;
+            this.logger.info({ lid: from, resolvedPhone: phone }, 'resolved LID to phone number');
+          }
+        } catch (err) {
+          this.logger.warn({ lid: from, err: (err as Error).message }, 'could not resolve LID');
+        }
+      }
+
       const hasMedia = Boolean(msg.hasMedia);
       const type: 'text' | 'image' = hasMedia ? 'image' : 'text';
       const incoming: IncomingMessage = {
@@ -293,6 +334,8 @@ export class WhatsAppWebJsAdapter implements WhatsAppMessagingPort {
   }
 
   private toChatId(phone: string): string {
+    // If already a chat ID (contains @), use as-is (handles @lid, @c.us, @g.us).
+    if (phone.includes('@')) return phone;
     // E.164 "+5491112345678" → WhatsApp "5491112345678@c.us"
     const digits = phone.replace(/^\+/, '').replace(/\D/g, '');
     return `${digits}@c.us`;
@@ -323,7 +366,7 @@ export async function buildWhatsAppAdapter(
   // Import dinámico para que el adapter pueda existir en módulos
   // testeados sin que la lib se cargue hasta este punto.
   const waModule = await import('whatsapp-web.js');
-  const { Client, LocalAuth } = waModule;
+  const { Client, LocalAuth } = waModule.default ?? waModule;
   const client = new Client({
     authStrategy: new LocalAuth({ clientId: config.clientId ?? 'sgcw-bot', dataPath: config.sessionPath }),
     puppeteer: {
@@ -331,7 +374,15 @@ export async function buildWhatsAppAdapter(
       // Sin `executablePath`: usa el Chromium que puppeteer descargó
       // en `node_modules/.pnpm/puppeteer*/.local-chromium/`. Si el
       // host no tiene display ni Chromium, el container maneja el error.
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu',
+      ],
     },
   });
   return new WhatsAppWebJsAdapter(client, config, logger);

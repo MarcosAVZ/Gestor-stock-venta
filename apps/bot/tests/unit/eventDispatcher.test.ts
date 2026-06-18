@@ -142,6 +142,7 @@ function buildDeps(port: WhatsAppMessagingPort) {
     usuarioRepo: buildMockUsuarioRepo('+5491112345678'),
     compraRepo: buildMockCompraRepo(),
     itemCompraRepo: buildMockItemCompraRepo(),
+    ventaRepo: { create: vi.fn(), findByUsuarioId: vi.fn(), findByProductoNombre: vi.fn(), sumIngresos: vi.fn(), sumGananciaTotal: vi.fn() } as never,
     queryDeps: { prisma: buildMockPrisma() as never, logger: silentLogger() },
     whitelist: new Set(['+5491112345678']),
   };

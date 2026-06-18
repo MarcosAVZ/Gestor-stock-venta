@@ -23,6 +23,10 @@
  * | CONFIRMACION_FINAL         | USUARIO_RECHAZA       | PREGUNTANDO_CANTIDAD    | PEDIR_CANTIDAD
  * | GUARDADO                   | (any)                 | PREGUNTANDO_PRODUCTO    | RESET
  * | AGREGANDO_STOCK            | SELECCIONAR_PRODUCTO  | PREGUNTANDO_CANTIDAD    | PEDIR_CANTIDAD
+ * | VENDIENDO_SELECCION        | SELECCIONAR_PRODUCTO_VENTA | VENDIENDO_CANTIDAD | PEDIR_CANTIDAD_VENTA
+ * | VENDIENDO_CANTIDAD         | CANTIDAD_VENTA_RECIBIDA | VENDIENDO_CONFIRMACION | MOSTRAR_RESUMEN_VENTA
+ * | VENDIENDO_CONFIRMACION     | CONFIRMAR_PRECIO_VENTA | GUARDADO            | GUARDAR_VENTA
+ * | VENDIENDO_CONFIRMACION     | USUARIO_RECHAZA       | VENDIENDO_CANTIDAD  | PEDIR_CANTIDAD_VENTA
  * | ANY                        | CANCELAR              | PREGUNTANDO_PRODUCTO    | RESET_CANCELAR
  * | ANY                        | MENU                  | PREGUNTANDO_PRODUCTO    | RESET_MENU
  * | ANY                        | TIMEOUT               | PREGUNTANDO_PRODUCTO    | RESET_TIMEOUT
@@ -45,6 +49,13 @@ export type ConversationEvent =
   | { type: 'USUARIO_CONFIRMA' }
   | { type: 'USUARIO_RECHAZA' }
   | { type: 'SELECCIONAR_PRODUCTO'; indice: number }
+  | { type: 'SELECCIONAR_CAMPO'; campo: string }
+  | { type: 'VALOR_EDITADO'; valor: string | number }
+  | { type: 'SELECCIONAR_PRODUCTO_VENTA'; indice: number }
+  | { type: 'CANTIDAD_VENTA_RECIBIDA'; valor: number }
+  | { type: 'CONFIRMAR_PRECIO_VENTA' }
+  | { type: 'COSTO_LOTE_AGREGAR_RECIBIDO'; valor: number }
+  | { type: 'CANTIDAD_AGREGAR_RECIBIDA'; valor: number }
   | { type: 'CANCELAR' }
   | { type: 'MENU' }
   | { type: 'TIMEOUT' };
@@ -60,7 +71,16 @@ export type Accion =
   | { tipo: 'MOSTRAR_RESUMEN'; resumen: string }
   | { tipo: 'GUARDAR' }
   | { tipo: 'RESET'; mensaje: string }
-  | { tipo: 'LISTAR_PRODUCTOS'; productos: Array<{ indice: number; nombre: string }> };
+  | { tipo: 'LISTAR_PRODUCTOS'; productos: Array<{ indice: number; nombre: string }> }
+  | { tipo: 'MOSTRAR_CAMPOS'; campos: string[] }
+  | { tipo: 'PEDIR_NUEVO_VALOR'; campo: string }
+  | { tipo: 'ACTUALIZAR_PRODUCTO' }
+  | { tipo: 'PEDIR_CONFIRMACION_ELIMINAR' }
+  | { tipo: 'CONFIRMADO_ELIMINAR' }
+  | { tipo: 'PEDIR_CANTIDAD_VENTA' }
+  | { tipo: 'PEDIR_COSTO_LOTE_AGREGAR' }
+  | { tipo: 'MOSTRAR_RESUMEN_VENTA'; resumen: string }
+  | { tipo: 'GUARDAR_VENTA' };
 
 // ── Result ──────────────────────────────────────────────────────────
 
@@ -199,7 +219,101 @@ export function transition(
 
     case ConversationState.AGREGANDO_STOCK:
       if (event.type === 'SELECCIONAR_PRODUCTO') {
-        return ok(ConversationState.PREGUNTANDO_CANTIDAD, { tipo: 'PEDIR_CANTIDAD' });
+        return ok(ConversationState.PREGUNTANDO_CANTIDAD_AGREGAR, {
+          tipo: 'PEDIR_CANTIDAD',
+        });
+      }
+      return invalid(current, event);
+
+    case ConversationState.PREGUNTANDO_CANTIDAD_AGREGAR:
+      if (event.type === 'CANTIDAD_AGREGAR_RECIBIDA') {
+        if (event.valor <= 0) {
+          return {
+            ok: false,
+            mensaje: 'La cantidad tiene que ser mayor a cero, ¿cuántas unidades del lote?',
+          };
+        }
+        return ok(ConversationState.PREGUNTANDO_COSTO_LOTE_AGREGAR, {
+          tipo: 'PEDIR_COSTO_LOTE_AGREGAR',
+        });
+      }
+      return invalid(current, event, 'esperaba un número');
+
+    case ConversationState.EDITANDO_SELECCION:
+      if (event.type === 'SELECCIONAR_CAMPO') {
+        return ok(ConversationState.EDITANDO_VALOR, {
+          tipo: 'PEDIR_NUEVO_VALOR',
+          campo: event.campo,
+        });
+      }
+      return invalid(current, event, 'seleccioná un campo (1-5)');
+
+    case ConversationState.EDITANDO_VALOR:
+      if (event.type === 'VALOR_EDITADO') {
+        return ok(ConversationState.CONFIRMACION_FINAL, {
+          tipo: 'MOSTRAR_RESUMEN',
+          resumen: 'ok',
+        });
+      }
+      return invalid(current, event, 'un valor válido');
+
+    case ConversationState.ELIMINANDO_PRODUCTOS:
+      if (event.type === 'USUARIO_CONFIRMA') {
+        return ok(ConversationState.PREGUNTANDO_PRODUCTO, {
+          tipo: 'CONFIRMADO_ELIMINAR',
+        });
+      }
+      if (event.type === 'USUARIO_RECHAZA') {
+        return ok(ConversationState.PREGUNTANDO_PRODUCTO, {
+          tipo: 'RESET',
+          mensaje: 'Ok, no borro nada.',
+        });
+      }
+      return invalid(current, event, 'sí o no');
+
+    case ConversationState.PREGUNTANDO_COSTO_LOTE_AGREGAR:
+      if (event.type === 'COSTO_LOTE_AGREGAR_RECIBIDO') {
+        if (event.valor <= 0) {
+          return {
+            ok: false,
+            mensaje: 'El costo tiene que ser mayor a cero. ¿Cuánto te costó el lote?',
+          };
+        }
+        return ok(ConversationState.PREGUNTANDO_PRECIO_VENTA, {
+          tipo: 'PEDIR_PRECIO_VENTA',
+        });
+      }
+      return invalid(current, event, 'un número mayor a cero');
+
+    case ConversationState.VENDIENDO_SELECCION:
+      if (event.type === 'SELECCIONAR_PRODUCTO_VENTA') {
+        return ok(ConversationState.VENDIENDO_CANTIDAD, {
+          tipo: 'PEDIR_CANTIDAD_VENTA',
+        });
+      }
+      return invalid(current, event, 'seleccioná un producto para vender');
+
+    case ConversationState.VENDIENDO_CANTIDAD:
+      if (event.type === 'CANTIDAD_VENTA_RECIBIDA') {
+        if (event.valor <= 0) {
+          return {
+            ok: false,
+            mensaje: 'La cantidad tiene que ser mayor a cero, ¿cuántas unidades vendiste?',
+          };
+        }
+        return ok(ConversationState.VENDIENDO_CONFIRMACION, {
+          tipo: 'MOSTRAR_RESUMEN_VENTA',
+          resumen: 'ok',
+        });
+      }
+      return invalid(current, event, 'esperaba un número');
+
+    case ConversationState.VENDIENDO_CONFIRMACION:
+      if (event.type === 'CONFIRMAR_PRECIO_VENTA') {
+        return ok(ConversationState.GUARDADO, { tipo: 'GUARDAR_VENTA' });
+      }
+      if (event.type === 'USUARIO_RECHAZA') {
+        return ok(ConversationState.VENDIENDO_CANTIDAD, { tipo: 'PEDIR_CANTIDAD_VENTA' });
       }
       return invalid(current, event);
 

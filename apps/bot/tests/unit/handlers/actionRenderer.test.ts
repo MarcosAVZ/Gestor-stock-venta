@@ -126,6 +126,23 @@ describe('actionRenderer — renderAccion', () => {
     const result = renderAccion({ tipo: 'GUARDAR_VENTA' }, {});
     expect(result).toEqual(['¡Listo, guardé la venta!']);
   });
+
+  it('PEDIR_COSTO_LOTE_AGREGAR with product suggestion shows cost hint', () => {
+    const result = renderAccion(
+      { tipo: 'PEDIR_COSTO_LOTE_AGREGAR' },
+      {
+        productosDisponibles: [{ indice: 1, nombre: 'medias', costoLote: 1200, precioVenta: 1500 }],
+        productoIndice: 1,
+      },
+    );
+    expect(result[0]).toContain('1200');
+    expect(result[0]).toContain('costo');
+  });
+
+  it('PEDIR_COSTO_LOTE_AGREGAR without product info returns generic prompt', () => {
+    const result = renderAccion({ tipo: 'PEDIR_COSTO_LOTE_AGREGAR' }, {});
+    expect(result[0]).toContain('costó el lote');
+  });
 });
 
 describe('actionRenderer — applyAccionToDatos', () => {

@@ -49,4 +49,25 @@ export interface ItemCompraRepository {
     nombre: string,
     minSimilarity?: number,
   ): Promise<(ItemCompra & { similarity: number }) | null>;
+
+  /**
+   * Actualiza un item por id. Usado por el flujo /editar.
+   */
+  updateById(id: string, data: Partial<{
+    nombre: string;
+    cantidadLote: number;
+    unidad: string;
+    costoLote: string;
+    costoUnitario: string;
+    precioVenta: string;
+    gananciaUnitaria: string;
+    gananciaTotal: string;
+  }>): Promise<ItemCompra>;
+
+  /**
+   * Elimina todos los items con un nombre dado para un usuario.
+   * También elimina las compras que queden vacías.
+   * Usado por el comando /eliminar (un producto a la vez).
+   */
+  deleteByNombreAndUsuarioId(nombre: string, usuarioId: string): Promise<number>;
 }

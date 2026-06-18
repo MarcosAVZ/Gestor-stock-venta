@@ -7,7 +7,7 @@
  * - EDITANDO_VALOR + VALOR_EDITADO
  * - ELIMINANDO_PRODUCTOS (confirm/reject)
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ConversationState } from '@compras-whatsapp/db';
 import { Decimal } from 'decimal.js';
 
@@ -31,6 +31,13 @@ function buildMockCtx(overrides: Partial<HandlerContext> = {}): HandlerContext {
       findByNombre: vi.fn(),
       updateById: vi.fn(),
       deleteByNombreAndUsuarioId: vi.fn(),
+    } as any,
+    ventaRepo: {
+      create: vi.fn(),
+      findByUsuarioId: vi.fn(),
+      findByProductoNombre: vi.fn(),
+      sumIngresos: vi.fn(),
+      sumGananciaTotal: vi.fn(),
     } as any,
     prisma: {} as any,
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any,

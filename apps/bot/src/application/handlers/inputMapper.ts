@@ -100,6 +100,17 @@ export function inputToEvent(
     }
   }
 
+  // PREGUNTANDO_COSTO_LOTE_AGREGAR: number → COSTO_LOTE_AGREGAR_RECIBIDO
+  if (state === ConversationState.PREGUNTANDO_COSTO_LOTE_AGREGAR) {
+    const parsed = precioSchema.safeParse(text);
+    if (parsed.success) {
+      return {
+        event: { type: 'COSTO_LOTE_AGREGAR_RECIBIDO', valor: parsed.data },
+        datosPatch: { costoLote: parsed.data },
+      };
+    }
+  }
+
   // PREGUNTANDO_PRECIO_VENTA: number → PRECIO_RECIBIDO
   if (state === ConversationState.PREGUNTANDO_PRECIO_VENTA) {
     const parsed = precioSchema.safeParse(text);
@@ -118,6 +129,17 @@ export function inputToEvent(
       return {
         event: { type: 'SELECCIONAR_PRODUCTO', indice: num },
         datosPatch: { productoIndice: num },
+      };
+    }
+  }
+
+  // PREGUNTANDO_CANTIDAD_AGREGAR: number → CANTIDAD_AGREGAR_RECIBIDA
+  if (state === ConversationState.PREGUNTANDO_CANTIDAD_AGREGAR) {
+    const parsed = cantidadSchema.safeParse(Number(text));
+    if (parsed.success) {
+      return {
+        event: { type: 'CANTIDAD_AGREGAR_RECIBIDA', valor: parsed.data },
+        datosPatch: { cantidadIngresada: parsed.data },
       };
     }
   }
@@ -151,6 +173,41 @@ export function inputToEvent(
       // Text fields (nombre, unidad) or fallback
       return {
         event: { type: 'VALOR_EDITADO', valor: text },
+        datosPatch: {},
+      };
+    }
+  }
+
+  // VENDIENDO_SELECCION: number → SELECCIONAR_PRODUCTO_VENTA
+  if (state === ConversationState.VENDIENDO_SELECCION) {
+    const num = Number(text);
+    if (!isNaN(num) && num > 0 && Number.isInteger(num)) {
+      return {
+        event: { type: 'SELECCIONAR_PRODUCTO_VENTA', indice: num },
+        datosPatch: { productoIndice: num },
+      };
+    }
+  }
+
+  // VENDIENDO_CANTIDAD: number → CANTIDAD_VENTA_RECIBIDA
+  if (state === ConversationState.VENDIENDO_CANTIDAD) {
+    const parsed = cantidadSchema.safeParse(Number(text));
+    if (parsed.success) {
+      return {
+        event: { type: 'CANTIDAD_VENTA_RECIBIDA', valor: parsed.data },
+        datosPatch: { cantidadIngresada: parsed.data },
+      };
+    }
+  }
+
+  // VENDIENDO_CONFIRMACION: si/no → CONFIRMAR_PRECIO_VENTA or USUARIO_RECHAZA
+  // Placed AFTER state-specific handlers so "1" in VENDIENDO_SELECCION
+  // maps to SELECCIONAR_PRODUCTO_VENTA, not USUARIO_CONFIRMA.
+  if (state === ConversationState.VENDIENDO_CONFIRMACION) {
+    const siNo = opcionSiNoSchema.safeParse(lower);
+    if (siNo.success) {
+      return {
+        event: siNo.data === 'si' ? { type: 'CONFIRMAR_PRECIO_VENTA' } : { type: 'USUARIO_RECHAZA' },
         datosPatch: {},
       };
     }

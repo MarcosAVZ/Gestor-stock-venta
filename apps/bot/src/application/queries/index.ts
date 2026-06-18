@@ -372,6 +372,218 @@ export async function getTopGanancias(
   }
 }
 
+// ── 9. ingresos ──────────────────────────────────────────────────────
+
+/** "Ingresos generados: $X." — suma de cantidad × precioVenta de Ventas. */
+export async function getIngresos(
+  usuarioId: string,
+  deps: QueryDeps,
+): Promise<string> {
+  try {
+    const ventas = (await deps.prisma.venta.findMany({
+      where: { usuarioId },
+    })) as Array<{ cantidad: number; precioVenta: unknown }>;
+
+    if (ventas.length === 0) return 'Todavía no registaste ventas. Usá /vender para empezar.';
+
+    const total = ventas.reduce(
+      (acc, v) => acc + v.cantidad * toNumber(v.precioVenta),
+      0,
+    );
+    return `Ingresos generados: $${fmtArs(total)}.`;
+  } catch (err) {
+    deps.logger.error(
+      { event: 'query_failed', query: 'ingresos', err: (err as Error).message },
+      'getIngresos failed',
+    );
+    return 'Tuve un error consultando ingresos. Probá de nuevo en un ratito.';
+  }
+}
+
+// ── 10. ganancia realizada ───────────────────────────────────────────
+
+/** "Ganancia realizada: $X." — suma de gananciaTotal de Ventas. */
+export async function getGananciaRealizada(
+  usuarioId: string,
+  deps: QueryDeps,
+): Promise<string> {
+  try {
+    const ventas = (await deps.prisma.venta.findMany({
+      where: { usuarioId },
+    })) as Array<{ gananciaTotal: unknown }>;
+
+    if (ventas.length === 0) return 'Todavía no registaste ventas. Usá /vender para empezar.';
+
+    const total = ventas.reduce(
+      (acc, v) => acc + toNumber(v.gananciaTotal),
+      0,
+    );
+    return `Ganancia realizada: $${fmtArs(total)}.`;
+  } catch (err) {
+    deps.logger.error(
+      { event: 'query_failed', query: 'ganancia-realizada', err: (err as Error).message },
+      'getGananciaRealizada failed',
+    );
+    return 'Tuve un error consultando ganancia realizada. Probá de nuevo en un ratito.';
+  }
+}
+
+// ── 11. stock per product (helper) ───────────────────────────────────
+
+export type StockPerProductInfo = {
+  stock: number;
+  latestPrecioVenta: number;
+  totalCost: number;
+};
+
+/**
+ * Mapa de producto → stock restante, precio de venta más reciente, y
+ * costo proporcional del stock restante. Usado por ganancia potencial
+ * y costo promedio.
+ */
+export async function getStockPerProduct(
+  usuarioId: string,
+  deps: QueryDeps,
+): Promise<Map<string, StockPerProductInfo>> {
+  const result = new Map<string, StockPerProductInfo>();
+
+  try {
+    const compras = (await deps.prisma.compra.findMany({
+      where: { usuarioId },
+      include: { items: true },
+    })) as Array<{ items: Array<{ nombre: string; cantidadLote: number; costoLote: unknown; precioVenta: unknown; updatedAt: Date }> }>;
+
+    const ventas = (await deps.prisma.venta.findMany({
+      where: { usuarioId },
+    })) as Array<{ productoNombre: string; cantidad: number }>;
+
+    if (compras.length === 0) return result;
+
+    // Build stock per product from ItemCompra
+    const stockMap = new Map<string, { totalStock: number; totalCost: number; latestPrecioVenta: number; latestUpdatedAt: Date }>();
+
+    for (const c of compras) {
+      for (const it of c.items) {
+        const current = stockMap.get(it.nombre);
+        const costLote = toNumber(it.costoLote);
+        const precioVenta = toNumber(it.precioVenta);
+        if (current === undefined) {
+          stockMap.set(it.nombre, {
+            totalStock: it.cantidadLote,
+            totalCost: costLote,
+            latestPrecioVenta: precioVenta,
+            latestUpdatedAt: it.updatedAt,
+          });
+        } else {
+          current.totalStock += it.cantidadLote;
+          current.totalCost += costLote;
+          // Keep the most recent precioVenta
+          if (it.updatedAt > current.latestUpdatedAt) {
+            current.latestPrecioVenta = precioVenta;
+            current.latestUpdatedAt = it.updatedAt;
+          }
+        }
+      }
+    }
+
+    // Subtract sold quantities
+    for (const v of ventas) {
+      const current = stockMap.get(v.productoNombre);
+      if (current) {
+        current.totalStock -= v.cantidad;
+      }
+    }
+
+    // Build result, excluding products with zero or negative stock
+    for (const [nombre, info] of stockMap) {
+      if (info.totalStock > 0) {
+        const unitCost = info.totalCost / (info.totalStock + ventas.filter(v => v.productoNombre === nombre).reduce((a, v) => a + v.cantidad, 0));
+        result.set(nombre, {
+          stock: info.totalStock,
+          latestPrecioVenta: info.latestPrecioVenta,
+          totalCost: unitCost * info.totalStock,
+        });
+      }
+    }
+
+    return result;
+  } catch (err) {
+    deps.logger.error(
+      { event: 'query_failed', query: 'stock-per-product', err: (err as Error).message },
+      'getStockPerProduct failed',
+    );
+    return result;
+  }
+}
+
+// ── 12. ganancia potencial ───────────────────────────────────────────
+
+/** "Ganancia potencial: $X." — ganancia de stock restante a precio de lista. */
+export async function getGananciaPotencial(
+  usuarioId: string,
+  deps: QueryDeps,
+): Promise<string> {
+  try {
+    const stockMap = await getStockPerProduct(usuarioId, deps);
+
+    if (stockMap.size === 0) {
+      // Check if there are any compras at all
+      const compras = (await deps.prisma.compra.findMany({
+        where: { usuarioId },
+      })) as Array<unknown>;
+      if (compras.length === 0) return 'Todavía no cargaste compras. Usá /nueva para empezar.';
+    }
+
+    let total = 0;
+    for (const [, info] of stockMap) {
+      total += info.stock * info.latestPrecioVenta - info.totalCost;
+    }
+    return `Ganancia potencial: $${fmtArs(total)}.`;
+  } catch (err) {
+    deps.logger.error(
+      { event: 'query_failed', query: 'ganancia-potencial', err: (err as Error).message },
+      'getGananciaPotencial failed',
+    );
+    return 'Tuve un error consultando ganancia potencial. Probá de nuevo en un ratito.';
+  }
+}
+
+// ── 13. costo promedio ───────────────────────────────────────────────
+
+/** "Costo promedio: $X." — costo promedio ponderado del stock restante. */
+export async function getCostoPromedio(
+  usuarioId: string,
+  deps: QueryDeps,
+): Promise<string> {
+  try {
+    const stockMap = await getStockPerProduct(usuarioId, deps);
+
+    if (stockMap.size === 0) {
+      const compras = (await deps.prisma.compra.findMany({
+        where: { usuarioId },
+      })) as Array<unknown>;
+      if (compras.length === 0) return 'Todavía no cargaste compras. Usá /nueva para empezar.';
+    }
+
+    let totalRemainingStock = 0;
+    let totalRemainingCost = 0;
+    for (const [, info] of stockMap) {
+      totalRemainingStock += info.stock;
+      totalRemainingCost += info.totalCost;
+    }
+
+    if (totalRemainingStock === 0) return 'Costo promedio: $0.';
+    const costoPromedio = totalRemainingCost / totalRemainingStock;
+    return `Costo promedio: $${fmtArs(costoPromedio)}.`;
+  } catch (err) {
+    deps.logger.error(
+      { event: 'query_failed', query: 'costo-promedio', err: (err as Error).message },
+      'getCostoPromedio failed',
+    );
+    return 'Tuve un error consultando costo promedio. Probá de nuevo en un ratito.';
+  }
+}
+
 // ── Command dispatcher (single entrypoint para el wire-up) ───────────
 
 /** Mapea un comando de texto a su use case. Retorna null si no matchea. */
@@ -383,7 +595,11 @@ export type QueryCommand =
   | { type: 'stock' }
   | { type: 'producto'; nombre: string }
   | { type: 'compras-mes' }
-  | { type: 'top-ganancias' };
+  | { type: 'top-ganancias' }
+  | { type: 'ingresos' }
+  | { type: 'ganancia-realizada' }
+  | { type: 'ganancia-potencial' }
+  | { type: 'costo-promedio' };
 
 export function parseQueryCommand(input: string): QueryCommand | null {
   const text = input.trim().toLowerCase();
@@ -396,6 +612,10 @@ export function parseQueryCommand(input: string): QueryCommand | null {
     return { type: 'compras-mes' };
   }
   if (text === 'top ganancias' || text === 'top') return { type: 'top-ganancias' };
+  if (text === 'ingresos') return { type: 'ingresos' };
+  if (text === 'ganancia realizada') return { type: 'ganancia-realizada' };
+  if (text === 'ganancia potencial') return { type: 'ganancia-potencial' };
+  if (text === 'costo promedio') return { type: 'costo-promedio' };
   if (text.startsWith('producto ')) {
     const nombre = text.slice('producto '.length).trim();
     if (nombre.length > 0) return { type: 'producto', nombre };
@@ -426,6 +646,14 @@ export async function executeQuery(
       return getComprasMes(usuarioId, deps);
     case 'top-ganancias':
       return getTopGanancias(5, deps);
+    case 'ingresos':
+      return getIngresos(usuarioId, deps);
+    case 'ganancia-realizada':
+      return getGananciaRealizada(usuarioId, deps);
+    case 'ganancia-potencial':
+      return getGananciaPotencial(usuarioId, deps);
+    case 'costo-promedio':
+      return getCostoPromedio(usuarioId, deps);
   }
 }
 
@@ -434,6 +662,9 @@ export const HELP_TEXT = `Comandos disponibles:
 
 /nueva — Cargar una compra nueva. Te voy a hacer paso a paso las preguntas.
 /agregar — Agregar stock a un producto que ya cargaste.
+/vender — Vender un producto que ya cargaste.
+/editar — Editar un producto existente (nombre, cantidad, unidad, costo o precio).
+/eliminar — Eliminar todos los productos cargados.
 /ayuda — Mostrar esta ayuda.
 
 Consultas:
@@ -445,6 +676,10 @@ Consultas:
 • producto <nombre> — Detalle de un producto.
 • compras mes — Listado de compras del mes.
 • top ganancias — Top productos por ganancia.
+• ingresos — Total de ingresos por ventas.
+• ganancia realizada — Ganancia total de ventas concretadas.
+• ganancia potencial — Ganancia estimada del stock restante.
+• costo promedio — Costo promedio del stock actual.
 
 En cualquier momento:
 • cancelar — Cancelar el flujo actual.
@@ -452,8 +687,8 @@ En cualquier momento:
 
 /** Mensaje de ayuda cuando el usuario tipea un comando desconocido. */
 export const UNKNOWN_COMMAND_MESSAGE =
-  'No entendí. Comandos: /nueva, /agregar, /ayuda, resumen, estadisticas, ganancias, productos, ' +
-  'stock, producto <nombre>, compras mes, top ganancias.';
+  'No entendí. Comandos: /nueva, /agregar, /editar, /eliminar, /ayuda, resumen, estadisticas, ganancias, productos, ' +
+  'stock, producto <nombre>, compras mes, top ganancias, ingresos, ganancia realizada, ganancia potencial, costo promedio.';
 
 /** Log cuando un comando desconocido llega (OWASP A09). */
 export function logUnknownCommand(logger: AnyLogger, raw: string): void {

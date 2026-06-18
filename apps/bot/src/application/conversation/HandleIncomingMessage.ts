@@ -30,6 +30,7 @@ import type { RateLimiter } from '../../infrastructure/messaging/rateLimiter.ts'
 import type { ConversacionRepository } from '../../domain/repositories/ConversacionRepository.ts';
 import type { CompraRepository } from '../../domain/repositories/CompraRepository.ts';
 import type { ItemCompraRepository } from '../../domain/repositories/ItemCompraRepository.ts';
+import type { VentaRepository } from '../../domain/repositories/VentaRepository.ts';
 import type { UsuarioRepository } from '../../domain/repositories/UsuarioRepository.ts';
 import { parseCommand } from '../commands/parseCommand.ts';
 import { saveCompra, type DatosParaGuardar } from './SaveCompra.ts';
@@ -68,6 +69,7 @@ export interface HandleIncomingMessageDeps {
   usuarioRepo: UsuarioRepository;
   compraRepo: CompraRepository;
   itemCompraRepo: ItemCompraRepository;
+  ventaRepo: VentaRepository;
   queryDeps: QueryDeps;
   whitelist: ReadonlySet<string>;
   inactivityTimeoutMs?: number;
@@ -157,6 +159,7 @@ export async function handleIncomingMessage(
       usuarioId, workingState, workingDatos,
       conversacionRepo, compraRepo: deps.compraRepo,
       itemCompraRepo: deps.itemCompraRepo,
+      ventaRepo: deps.ventaRepo,
       prisma: queryDeps.prisma, logger,
     };
     const slashResult = await handleSlashCommand(slashCmd, ctx);
@@ -189,6 +192,7 @@ export async function handleIncomingMessage(
     usuarioId, workingState, workingDatos,
     conversacionRepo, compraRepo: deps.compraRepo,
     itemCompraRepo: deps.itemCompraRepo,
+    ventaRepo: deps.ventaRepo,
     prisma: queryDeps.prisma, logger,
   };
   const specialResult = await handleSpecialCase({ workingState, event, workingDatos, ctx });

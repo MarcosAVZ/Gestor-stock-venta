@@ -46,6 +46,8 @@ export async function handleSlashCommand(
       return eliminarHandler(ctx);
     case 'ayuda':
       return ayudaHandler(ctx);
+    case 'vender':
+      return venderHandler(ctx);
   }
 }
 
@@ -136,6 +138,29 @@ function ayudaHandler(ctx: HandlerContext): SlashHandlerOutput {
   return {
     responses: [HELP_TEXT],
     newState: ctx.workingState,
+    rejected: false,
+  };
+}
+
+async function venderHandler(ctx: HandlerContext): Promise<SlashHandlerOutput> {
+  const { listarProductosConStock } = await import('../conversation/Vender.ts');
+  const productos = await listarProductosConStock(ctx.usuarioId, { prisma: ctx.prisma, ventaRepo: ctx.ventaRepo as any });
+  if (productos.length === 0) {
+    return {
+      responses: ['No tenés productos con stock para vender.'],
+      newState: ctx.workingState,
+      rejected: false,
+    };
+  }
+  const lines = productos.map((p) => `${p.indice}. ${p.nombre} (stock: ${p.stock})`);
+  const lista = `Seleccioná el producto que querés vender:\n${lines.join('\n')}`;
+  await ctx.conversacionRepo.update(ctx.usuarioId, {
+    estado: ConversationState.VENDIENDO_SELECCION,
+    datosTemporales: { productosDisponibles: productos },
+  });
+  return {
+    responses: [lista],
+    newState: ConversationState.VENDIENDO_SELECCION,
     rejected: false,
   };
 }

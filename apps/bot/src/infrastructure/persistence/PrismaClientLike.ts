@@ -9,7 +9,7 @@
  * adapter usa algo no declarado.
  */
 
-import type { Moneda, Unidad, Usuario, ItemCompra } from '@compras-whatsapp/db';
+import type { Moneda, Unidad, Usuario, ItemCompra, Venta } from '@compras-whatsapp/db';
 
 export type CompraWithItems = {
   id: string;
@@ -44,6 +44,7 @@ export type PrismaClientLike = {
       take?: number;
       include?: { items?: boolean };
     }) => Promise<unknown[]>;
+    deleteMany: (args: { where: Record<string, unknown> }) => Promise<{ count: number }>;
   };
   itemCompra: {
     createMany: (args: { data: NewItemCompraRow[] }) => Promise<{ count: number }>;
@@ -55,6 +56,8 @@ export type PrismaClientLike = {
       include?: unknown;
     }) => Promise<unknown[]>;
     findFirst: (args: { where: unknown; orderBy?: unknown }) => Promise<unknown>;
+    update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<unknown>;
+    deleteMany: (args: { where: Record<string, unknown> }) => Promise<{ count: number }>;
   };
   conversacion: {
     findUnique: (args: { where: { usuarioId: string } }) => Promise<unknown>;
@@ -64,6 +67,19 @@ export type PrismaClientLike = {
       update: { estado?: unknown; datosTemporales?: unknown };
     }) => Promise<unknown>;
     update: (args: { where: { usuarioId: string }; data: unknown }) => Promise<unknown>;
+  };
+  venta: {
+    create: (args: { data: VentaCreateInput }) => Promise<Venta>;
+    findMany: (args: {
+      where: Record<string, unknown>;
+      orderBy?: Record<string, 'asc' | 'desc'>;
+      take?: number;
+    }) => Promise<Venta[]>;
+    count: (args: { where: Record<string, unknown> }) => Promise<number>;
+    aggregate: (args: {
+      where: Record<string, unknown>;
+      _sum?: Record<string, boolean>;
+    }) => Promise<unknown>;
   };
   $queryRaw: ((strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>) & ((
     sql: { strings: string[]; values: unknown[] },
@@ -79,6 +95,17 @@ export type NewItemCompraRow = {
   costoLote: string;
   costoUnitario: string;
   precioVenta: string;
+  gananciaUnitaria: string;
+  gananciaTotal: string;
+};
+
+/** Input para crear una Venta via Prisma. */
+export type VentaCreateInput = {
+  usuarioId: string;
+  productoNombre: string;
+  cantidad: number;
+  precioVenta: string;
+  costoUnitario: string;
   gananciaUnitaria: string;
   gananciaTotal: string;
 };

@@ -72,4 +72,17 @@ describe('parseCommand', () => {
   it('/nueva compra → null (argumentos extra no soportados)', () => {
     expect(parseCommand('/nueva compra')).toBeNull();
   });
+
+  // ── /vender ──────────────────────────────────────────────────────
+  it('/vender → vender', () => {
+    expect(parseCommand('/vender')).toEqual({ type: 'vender' });
+  });
+
+  it('vender (sin slash) → vender', () => {
+    expect(parseCommand('vender')).toEqual({ type: 'vender' });
+  });
+
+  it('/VENDER (uppercase) → vender', () => {
+    expect(parseCommand('/VENDER')).toEqual({ type: 'vender' });
+  });
 });

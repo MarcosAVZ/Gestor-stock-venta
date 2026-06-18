@@ -40,6 +40,7 @@ import { PrismaCompraRepository } from '../infrastructure/persistence/PrismaComp
 import { PrismaConversacionRepository } from '../infrastructure/persistence/PrismaConversacionRepository.ts';
 import { PrismaItemCompraRepository } from '../infrastructure/persistence/PrismaItemCompraRepository.ts';
 import { PrismaUsuarioRepository } from '../infrastructure/persistence/PrismaUsuarioRepository.ts';
+import { PrismaVentaRepository } from '../infrastructure/persistence/PrismaVentaRepository.ts';
 import { buildApp, startServer, type ServerHandle } from '../interface/http/server.ts';
 import {
   buildEventDispatcher,
@@ -126,6 +127,8 @@ export async function buildContainer(opts: ContainerOptions = {}): Promise<AppCo
   // Lo instanciamos acá para que el wiring esté cerrado, aunque
   // HandleIncomingMessage no lo consuma todavía.
   const itemCompraRepo = new PrismaItemCompraRepository(prisma);
+  // VentaRepository para el flujo de ventas (stock-lotes-y-ventas).
+  const ventaRepo = new PrismaVentaRepository(prisma);
 
   // 3. RateLimiter
   const rateLimiter = new RateLimiter({
@@ -161,6 +164,7 @@ export async function buildContainer(opts: ContainerOptions = {}): Promise<AppCo
     usuarioRepo,
     compraRepo,
     itemCompraRepo,
+    ventaRepo,
     queryDeps: { prisma, logger },
     whitelist,
     inactivityTimeoutMs,

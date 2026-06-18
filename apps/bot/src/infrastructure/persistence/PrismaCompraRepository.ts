@@ -66,4 +66,11 @@ export class PrismaCompraRepository implements CompraRepository {
       take: limit,
     });
   }
+
+  async deleteAllByUsuarioId(usuarioId: string): Promise<number> {
+    const result = await this.db.compra.deleteMany({
+      where: { usuarioId },
+    });
+    return result.count;
+  }
 }

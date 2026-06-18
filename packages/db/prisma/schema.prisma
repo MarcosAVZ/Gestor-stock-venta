@@ -52,6 +52,14 @@ enum ConversationState {
   CONFIRMACION_FINAL
   GUARDADO
   AGREGANDO_STOCK
+  EDITANDO_SELECCION
+  EDITANDO_VALOR
+  ELIMINANDO_PRODUCTOS
+  PREGUNTANDO_CANTIDAD_AGREGAR
+  PREGUNTANDO_COSTO_LOTE_AGREGAR
+  VENDIENDO_SELECCION
+  VENDIENDO_CANTIDAD
+  VENDIENDO_CONFIRMACION
 }
 
 // ── Modelos ──────────────────────────────────────────────────────────
@@ -62,6 +70,7 @@ model Usuario {
   nombre       String?
   createdAt    DateTime      @default(now())
   compras      Compra[]
+  ventas       Venta[]
   conversacion Conversacion?
 
   @@index([telefono])
@@ -108,4 +117,20 @@ model Conversacion {
   usuario         Usuario           @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 
   @@index([estado])
+}
+
+model Venta {
+  id               String   @id @default(cuid())
+  usuarioId        String
+  productoNombre   String
+  cantidad         Int
+  precioVenta      Decimal  @db.Decimal(12, 2)
+  costoUnitario    Decimal  @db.Decimal(12, 4)
+  gananciaUnitaria Decimal  @db.Decimal(12, 4)
+  gananciaTotal    Decimal  @db.Decimal(12, 2)
+  fecha            DateTime @default(now())
+  usuario          Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId, fecha])
+  @@index([usuarioId, productoNombre])
 }

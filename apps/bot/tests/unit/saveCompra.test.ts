@@ -31,6 +31,7 @@ function buildMockCompraRepo() {
     findByUsuarioId: vi.fn(),
     findByDateRange: vi.fn(),
     findTopByGanancias: vi.fn(),
+    deleteAllByUsuarioId: vi.fn(),
   };
 }
 
@@ -53,6 +54,8 @@ function buildMockItemCompraRepo() {
     ]),
     findByNombre: vi.fn(),
     findRecentByNombre: vi.fn(),
+    updateById: vi.fn(),
+    deleteByNombreAndUsuarioId: vi.fn(),
   };
 }
 

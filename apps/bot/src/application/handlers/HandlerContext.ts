@@ -18,6 +18,7 @@ import type { Logger } from 'pino';
 import type { ConversacionRepository } from '../../domain/repositories/ConversacionRepository.ts';
 import type { CompraRepository } from '../../domain/repositories/CompraRepository.ts';
 import type { ItemCompraRepository } from '../../domain/repositories/ItemCompraRepository.ts';
+import type { VentaRepository } from '../../domain/repositories/VentaRepository.ts';
 import type { PrismaClientLike } from '../../infrastructure/persistence/PrismaClientLike.ts';
 
 export interface HandlerContext {
@@ -33,6 +34,8 @@ export interface HandlerContext {
   compraRepo: CompraRepository;
   /** Repositorio de items de compra (para CRUD de items). */
   itemCompraRepo: ItemCompraRepository;
+  /** Repositorio de ventas (para crear ventas). */
+  ventaRepo: VentaRepository;
   /** Prisma client para queries de listarProductos. */
   prisma: PrismaClientLike;
   /** Logger estructurado (pino). */

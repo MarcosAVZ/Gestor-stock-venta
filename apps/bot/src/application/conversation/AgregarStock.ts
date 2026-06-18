@@ -105,15 +105,23 @@ export async function listarProductos(
 // ── agregarStock ──────────────────────────────────────────────────────
 
 /**
- * Adds stock to an existing product.
- * Creates a new Compra + ItemCompra reusing the original cost/price
- * and calculating metrics with the new quantity.
+ * Adds stock to an existing product as an independent lot.
+ * Creates a new Compra + ItemCompra with user-provided cost/price
+ * (not reusing from existing product).
  *
  * @throws {Error} if productoIndice doesn't match any product
  * @throws {Error} if cantidadNueva <= 0
+ * @throws {Error} if costoLote <= 0
+ * @throws {Error} if precioVenta <= 0
  */
 export async function agregarStock(
-  input: { usuarioId: string; productoIndice: number; cantidadNueva: number },
+  input: {
+    usuarioId: string;
+    productoIndice: number;
+    cantidadNueva: number;
+    costoLote: number;
+    precioVenta: number;
+  },
   deps: AgregarStockDeps,
 ): Promise<void> {
   const productos = await listarProductos(input.usuarioId, deps);
@@ -124,24 +132,30 @@ export async function agregarStock(
   if (input.cantidadNueva <= 0) {
     throw new Error('La cantidad tiene que ser mayor a cero');
   }
+  if (input.costoLote <= 0) {
+    throw new Error('El costo del lote tiene que ser mayor a cero');
+  }
+  if (input.precioVenta <= 0) {
+    throw new Error('El precio de venta tiene que ser mayor a cero');
+  }
 
-  // Calculate metrics with reused cost/price and new quantity
+  // Calculate metrics with user-provided cost/price and new quantity
   const m = calcularMetricas({
-    costoLote: selected.costoLote,
+    costoLote: input.costoLote,
     cantidadReal: input.cantidadNueva,
-    precioVenta: selected.precioVenta,
+    precioVenta: input.precioVenta,
   });
 
-  // Create Compra + ItemCompra
+  // Create Compra + ItemCompra (independent lot)
   const compra = await deps.compraRepo.create({ usuarioId: input.usuarioId });
   await deps.itemCompraRepo.createMany([{
     compraId: compra.id,
     nombre: selected.nombre,
     cantidadLote: input.cantidadNueva,
     unidad: selected.unidad as any,
-    costoLote: new Decimal(selected.costoLote).toFixed(2),
+    costoLote: new Decimal(input.costoLote).toFixed(2),
     costoUnitario: m.costoUnitario.toDecimalPlaces(4).toFixed(),
-    precioVenta: new Decimal(selected.precioVenta).toFixed(2),
+    precioVenta: new Decimal(input.precioVenta).toFixed(2),
     gananciaUnitaria: m.gananciaUnitaria.toDecimalPlaces(4).toFixed(),
     gananciaTotal: m.gananciaTotalEstimada.toDecimalPlaces(2).toFixed(),
   }]);

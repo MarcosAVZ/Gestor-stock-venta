@@ -4,7 +4,7 @@
  * Verifica que handleSlashCommand despacha correctamente cada /comando
  * usando un HandlerContext mockeado.
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ConversationState } from '@compras-whatsapp/db';
 
 import { handleSlashCommand } from '../../../src/application/handlers/slashHandlers.ts';
@@ -24,6 +24,7 @@ function buildMockCtx(overrides: Partial<HandlerContext> = {}): HandlerContext {
     } as any,
     compraRepo: {} as any,
     itemCompraRepo: {} as any,
+    ventaRepo: {} as any,
     prisma: {} as any,
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any,
     ...overrides,
@@ -33,6 +34,11 @@ function buildMockCtx(overrides: Partial<HandlerContext> = {}): HandlerContext {
 // Mock listarProductos
 vi.mock('../../../src/application/conversation/AgregarStock.ts', () => ({
   listarProductos: vi.fn(),
+}));
+
+// Mock listarProductosConStock
+vi.mock('../../../src/application/conversation/Vender.ts', () => ({
+  listarProductosConStock: vi.fn(),
 }));
 
 // ── Tests ───────────────────────────────────────────────────────────
@@ -117,6 +123,27 @@ describe('slashHandlers — handleSlashCommand', () => {
       const ctx = buildMockCtx();
       await handleSlashCommand({ type: 'ayuda' }, ctx);
       expect(ctx.conversacionRepo.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('/vender', () => {
+    it('sets state to VENDIENDO_SELECCION when products have stock', async () => {
+      const { listarProductosConStock } = await import('../../../src/application/conversation/Vender.ts');
+      vi.mocked(listarProductosConStock).mockResolvedValue([
+        { indice: 1, nombre: 'medias', stock: 80 },
+      ]);
+      const ctx = buildMockCtx();
+      const result = await handleSlashCommand({ type: 'vender' }, ctx);
+      expect(result.newState).toBe(ConversationState.VENDIENDO_SELECCION);
+      expect(result.responses[0]).toContain('1. medias');
+    });
+
+    it('returns message when no products have stock', async () => {
+      const { listarProductosConStock } = await import('../../../src/application/conversation/Vender.ts');
+      vi.mocked(listarProductosConStock).mockResolvedValue([]);
+      const ctx = buildMockCtx();
+      const result = await handleSlashCommand({ type: 'vender' }, ctx);
+      expect(result.responses[0]).toMatch(/No tenés productos con stock/);
     });
   });
 });

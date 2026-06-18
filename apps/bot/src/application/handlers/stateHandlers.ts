@@ -51,7 +51,7 @@ export async function handleSpecialCase(
 
   // ── AGREGANDO_STOCK (product selected) ──
   if (workingState === ConversationState.AGREGANDO_STOCK && event.type === 'SELECCIONAR_PRODUCTO') {
-    return handleAgregarStockSelection(event, workingDatos, ctx);
+    return handleAgregarStockSelection(event, workingDatos, ctx, workingState);
   }
 
   // ── EDITANDO_SELECCION (field selected) ──
@@ -78,6 +78,7 @@ async function handleAgregarStockSelection(
   event: Extract<ConversationEvent, { type: 'SELECCIONAR_PRODUCTO' }>,
   workingDatos: Record<string, unknown>,
   ctx: HandlerContext,
+  workingState: ConversationState,
 ): Promise<HandlerOutput> {
   const modo = workingDatos['modo'];
 
@@ -117,7 +118,20 @@ async function handleAgregarStockSelection(
     };
   }
 
-  // modo === 'agregar' — fall through to state machine
+  // modo === 'agregar' — store selected product details for cost suggestion, fall through to state machine
+  const productos = workingDatos['productosDisponibles'] as Array<{ indice: number; nombre: string; costoLote: number; precioVenta: number; unidad: string }> | undefined;
+  const selected = productos?.find((p) => p.indice === event.indice);
+  if (selected !== undefined) {
+    await ctx.conversacionRepo.update(ctx.usuarioId, {
+      estado: workingState,
+      datosTemporales: {
+        ...workingDatos,
+        productoIndice: event.indice,
+        producto: selected.nombre,
+        unidad: selected.unidad,
+      },
+    });
+  }
   return null;
 }
 

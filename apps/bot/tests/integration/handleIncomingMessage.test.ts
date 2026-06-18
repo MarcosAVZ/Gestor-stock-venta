@@ -186,7 +186,13 @@ describe('handleIncomingMessage (integration)', () => {
       usuarioRepo,
       compraRepo: buildMockCompraRepo(),
       itemCompraRepo: buildMockItemCompraRepo(),
-      queryDeps: { prisma: {} as never, logger },
+      queryDeps: {
+        prisma: {
+          itemCompra: { findMany: vi.fn(async () => []) },
+          compra: { findMany: vi.fn(async () => []) },
+        } as never,
+        logger,
+      },
       whitelist: WHITELIST,
     };
     usuarioRepo.findByTelefono.mockResolvedValue({
@@ -251,12 +257,30 @@ describe('handleIncomingMessage (integration)', () => {
       expect(out.responses[0]).toMatch(/producto/i);
     });
 
-    it('/agregar sets state to AGREGANDO_STOCK', async () => {
+    it('/agregar sets state to AGREGANDO_STOCK when products exist', async () => {
+      // Mock prisma to return at least one product
+      const mockPrisma = {
+        itemCompra: {
+          findMany: vi.fn(async () => [
+            { nombre: 'medias', costoLote: 1200, precioVenta: 1500, unidad: 'PAR' },
+          ]),
+        },
+        compra: { findMany: vi.fn(async () => []) },
+      };
+      deps.queryDeps = { prisma: mockPrisma as never, logger };
       const out = await handleIncomingMessage(
         { phone: '+5491111111111', type: 'text', body: '/agregar' },
         deps,
       );
       expect(out.newState).toBe(ConversationState.AGREGANDO_STOCK);
+    });
+
+    it('/agregar shows message when no products exist', async () => {
+      const out = await handleIncomingMessage(
+        { phone: '+5491111111111', type: 'text', body: '/agregar' },
+        deps,
+      );
+      expect(out.responses[0]).toMatch(/No tenés productos cargados/);
     });
 
     it('/ayuda returns help text', async () => {

@@ -155,6 +155,40 @@ describe('inputMapper — inputToEvent', () => {
     });
   });
 
+  // ── PREGUNTANDO_CANTIDAD_AGREGAR ────────────────────────────────
+
+  describe('PREGUNTANDO_CANTIDAD_AGREGAR', () => {
+    it('"12" returns CANTIDAD_AGREGAR_RECIBIDA with number', () => {
+      const result = inputToEvent(makeInput('12'), ConversationState.PREGUNTANDO_CANTIDAD_AGREGAR, {});
+      expect(result).toEqual({
+        event: { type: 'CANTIDAD_AGREGAR_RECIBIDA', valor: 12 },
+        datosPatch: { cantidadIngresada: 12 },
+      });
+    });
+
+    it('"abc" returns null (not a number)', () => {
+      const result = inputToEvent(makeInput('abc'), ConversationState.PREGUNTANDO_CANTIDAD_AGREGAR, {});
+      expect(result).toBeNull();
+    });
+  });
+
+  // ── PREGUNTANDO_COSTO_LOTE_AGREGAR ─────────────────────────────
+
+  describe('PREGUNTANDO_COSTO_LOTE_AGREGAR', () => {
+    it('"5000" returns COSTO_LOTE_AGREGAR_RECIBIDO', () => {
+      const result = inputToEvent(makeInput('5000'), ConversationState.PREGUNTANDO_COSTO_LOTE_AGREGAR, {});
+      expect(result).toEqual({
+        event: { type: 'COSTO_LOTE_AGREGAR_RECIBIDO', valor: 5000 },
+        datosPatch: { costoLote: 5000 },
+      });
+    });
+
+    it('"abc" returns null', () => {
+      const result = inputToEvent(makeInput('abc'), ConversationState.PREGUNTANDO_COSTO_LOTE_AGREGAR, {});
+      expect(result).toBeNull();
+    });
+  });
+
   // ── EDITANDO_SELECCION ──────────────────────────────────────────
 
   describe('EDITANDO_SELECCION', () => {
@@ -203,6 +237,59 @@ describe('inputMapper — inputToEvent', () => {
         { campoEditando: '1' },
       );
       expect(result).toBeNull();
+    });
+  });
+
+  // ── VENDIENDO_SELECCION ──────────────────────────────────────────
+
+  describe('VENDIENDO_SELECCION', () => {
+    it('"1" returns SELECCIONAR_PRODUCTO_VENTA with indice 1', () => {
+      const result = inputToEvent(makeInput('1'), ConversationState.VENDIENDO_SELECCION, {});
+      expect(result).toEqual({
+        event: { type: 'SELECCIONAR_PRODUCTO_VENTA', indice: 1 },
+        datosPatch: { productoIndice: 1 },
+      });
+    });
+
+    it('"abc" returns null (not a number)', () => {
+      const result = inputToEvent(makeInput('abc'), ConversationState.VENDIENDO_SELECCION, {});
+      expect(result).toBeNull();
+    });
+  });
+
+  // ── VENDIENDO_CANTIDAD ──────────────────────────────────────────
+
+  describe('VENDIENDO_CANTIDAD', () => {
+    it('"10" returns CANTIDAD_VENTA_RECIBIDA with number', () => {
+      const result = inputToEvent(makeInput('10'), ConversationState.VENDIENDO_CANTIDAD, {});
+      expect(result).toEqual({
+        event: { type: 'CANTIDAD_VENTA_RECIBIDA', valor: 10 },
+        datosPatch: { cantidadIngresada: 10 },
+      });
+    });
+
+    it('"abc" returns null (not a number)', () => {
+      const result = inputToEvent(makeInput('abc'), ConversationState.VENDIENDO_CANTIDAD, {});
+      expect(result).toBeNull();
+    });
+  });
+
+  // ── VENDIENDO_CONFIRMACION ──────────────────────────────────────
+
+  describe('VENDIENDO_CONFIRMACION', () => {
+    it('"sí" returns CONFIRMAR_PRECIO_VENTA', () => {
+      const result = inputToEvent(makeInput('sí'), ConversationState.VENDIENDO_CONFIRMACION, {});
+      expect(result?.event.type).toBe('CONFIRMAR_PRECIO_VENTA');
+    });
+
+    it('"si" returns CONFIRMAR_PRECIO_VENTA', () => {
+      const result = inputToEvent(makeInput('si'), ConversationState.VENDIENDO_CONFIRMACION, {});
+      expect(result?.event.type).toBe('CONFIRMAR_PRECIO_VENTA');
+    });
+
+    it('"no" returns USUARIO_RECHAZA', () => {
+      const result = inputToEvent(makeInput('no'), ConversationState.VENDIENDO_CONFIRMACION, {});
+      expect(result?.event.type).toBe('USUARIO_RECHAZA');
     });
   });
 

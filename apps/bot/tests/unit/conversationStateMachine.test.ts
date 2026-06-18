@@ -118,16 +118,62 @@ describe('conversationStateMachine', () => {
       }
     });
 
-    it('AGREGANDO_STOCK + SELECCIONAR_PRODUCTO → PREGUNTANDO_CANTIDAD / PEDIR_CANTIDAD', () => {
+    it('AGREGANDO_STOCK + SELECCIONAR_PRODUCTO → PREGUNTANDO_CANTIDAD_AGREGAR / PEDIR_CANTIDAD', () => {
       const r = transition(ConversationState.AGREGANDO_STOCK, {
         type: 'SELECCIONAR_PRODUCTO',
         indice: 2,
       });
       expect(r).toEqual({
         ok: true,
-        siguiente: ConversationState.PREGUNTANDO_CANTIDAD,
+        siguiente: ConversationState.PREGUNTANDO_CANTIDAD_AGREGAR,
         accion: { tipo: 'PEDIR_CANTIDAD' },
       });
+    });
+
+    it('PREGUNTANDO_CANTIDAD_AGREGAR + CANTIDAD_AGREGAR_RECIBIDA(12) → PREGUNTANDO_COSTO_LOTE_AGREGAR / PEDIR_COSTO_LOTE_AGREGAR', () => {
+      const r = transition(ConversationState.PREGUNTANDO_CANTIDAD_AGREGAR, {
+        type: 'CANTIDAD_AGREGAR_RECIBIDA',
+        valor: 12,
+      });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.PREGUNTANDO_COSTO_LOTE_AGREGAR,
+        accion: { tipo: 'PEDIR_COSTO_LOTE_AGREGAR' },
+      });
+    });
+
+    it('PREGUNTANDO_COSTO_LOTE_AGREGAR + COSTO_LOTE_AGREGAR_RECIBIDO(5000) → PREGUNTANDO_PRECIO_VENTA / PEDIR_PRECIO_VENTA', () => {
+      const r = transition(ConversationState.PREGUNTANDO_COSTO_LOTE_AGREGAR, {
+        type: 'COSTO_LOTE_AGREGAR_RECIBIDO',
+        valor: 5000,
+      });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.PREGUNTANDO_PRECIO_VENTA,
+        accion: { tipo: 'PEDIR_PRECIO_VENTA' },
+      });
+    });
+
+    it('PREGUNTANDO_CANTIDAD_AGREGAR + CANTIDAD_AGREGAR_RECIBIDA(0) → reject (must be > 0)', () => {
+      const r = transition(ConversationState.PREGUNTANDO_CANTIDAD_AGREGAR, {
+        type: 'CANTIDAD_AGREGAR_RECIBIDA',
+        valor: 0,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.mensaje).toContain('mayor a cero');
+      }
+    });
+
+    it('PREGUNTANDO_COSTO_LOTE_AGREGAR + COSTO_LOTE_AGREGAR_RECIBIDO(0) → reject (must be > 0)', () => {
+      const r = transition(ConversationState.PREGUNTANDO_COSTO_LOTE_AGREGAR, {
+        type: 'COSTO_LOTE_AGREGAR_RECIBIDO',
+        valor: 0,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.mensaje).toContain('mayor a cero');
+      }
     });
   });
 
@@ -272,6 +318,11 @@ describe('conversationStateMachine', () => {
         { type: 'USUARIO_CONFIRMA' },
         { type: 'USUARIO_RECHAZA' },
         { type: 'SELECCIONAR_PRODUCTO', indice: 0 },
+        { type: 'SELECCIONAR_PRODUCTO_VENTA', indice: 0 },
+        { type: 'CANTIDAD_VENTA_RECIBIDA', valor: 1 },
+        { type: 'CONFIRMAR_PRECIO_VENTA' },
+        { type: 'COSTO_LOTE_AGREGAR_RECIBIDO', valor: 1000 },
+        { type: 'CANTIDAD_AGREGAR_RECIBIDA', valor: 1 },
         { type: 'CANCELAR' },
         { type: 'MENU' },
         { type: 'TIMEOUT' },

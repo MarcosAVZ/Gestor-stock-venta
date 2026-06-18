@@ -14,7 +14,10 @@
 export type BotCommand =
   | { type: 'nueva' }
   | { type: 'agregar' }
-  | { type: 'ayuda' };
+  | { type: 'editar' }
+  | { type: 'eliminar' }
+  | { type: 'ayuda' }
+  | { type: 'vender' };
 
 /**
  * Parses text input into a BotCommand.
@@ -26,6 +29,9 @@ export function parseCommand(input: string): BotCommand | null {
   const text = input.trim().toLowerCase();
   if (text === '/nueva' || text === 'nueva') return { type: 'nueva' };
   if (text === '/agregar' || text === 'agregar') return { type: 'agregar' };
+  if (text === '/editar' || text === 'editar') return { type: 'editar' };
+  if (text === '/eliminar' || text === 'eliminar') return { type: 'eliminar' };
   if (text === '/ayuda' || text === 'ayuda' || text === '/help' || text === 'help') return { type: 'ayuda' };
+  if (text === '/vender' || text === 'vender') return { type: 'vender' };
   return null;
 }

@@ -31,6 +31,7 @@ function buildMockCompraRepo() {
     findByUsuarioId: vi.fn(),
     findByDateRange: vi.fn(),
     findTopByGanancias: vi.fn(),
+    deleteAllByUsuarioId: vi.fn(),
   };
 }
 
@@ -53,6 +54,8 @@ function buildMockItemCompraRepo() {
     ]),
     findByNombre: vi.fn(),
     findRecentByNombre: vi.fn(),
+    updateById: vi.fn(),
+    deleteByNombreAndUsuarioId: vi.fn(),
   };
 }
 
@@ -153,7 +156,7 @@ describe('listarProductos', () => {
 // ── agregarStock tests ────────────────────────────────────────────────
 
 describe('agregarStock', () => {
-  it('crea Compra + ItemCompra reutilizando costo/precio del producto', async () => {
+  it('crea Compra + ItemCompra con costo/precio provisto por el usuario', async () => {
     const prisma = buildMockPrisma([
       { nombre: 'medias negras', costoLote: 1200, precioVenta: 1500, unidad: 'PAR' },
     ]);
@@ -161,23 +164,23 @@ describe('agregarStock', () => {
     const itemCompraRepo = buildMockItemCompraRepo();
 
     await agregarStock(
-      { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: 12 },
+      { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: 12, costoLote: 2000, precioVenta: 250 },
       { prisma, compraRepo, itemCompraRepo },
     );
 
     // Verificar que se creó la compra
     expect(compraRepo.create).toHaveBeenCalledWith({ usuarioId: 'user-1' });
 
-    // Verificar que se creó el item con métricas correctas
+    // Verificar que se creó el item con métricas correctas usando el costo/precio del usuario
     expect(itemCompraRepo.createMany).toHaveBeenCalledTimes(1);
     const call = itemCompraRepo.createMany.mock.calls[0]?.[0]?.[0];
     expect(call?.nombre).toBe('medias negras');
     expect(call?.cantidadLote).toBe(12);
-    expect(call?.costoLote).toBe('1200.00');
-    expect(call?.precioVenta).toBe('1500.00');
-    expect(call?.costoUnitario).toBe('100'); // 1200/12 → Decimal.toDecimalPlaces(4).toFixed()
-    expect(call?.gananciaUnitaria).toBe('1400'); // 1500 - 100
-    expect(call?.gananciaTotal).toBe('16800'); // 1400 * 12
+    expect(call?.costoLote).toBe('2000.00'); // user-provided, NOT the old 1200
+    expect(call?.precioVenta).toBe('250.00'); // user-provided, NOT the old 1500
+    expect(call?.costoUnitario).toBe('166.6667'); // 2000/12
+    expect(call?.gananciaUnitaria).toBe('83.3333'); // 250 - 166.6667
+    expect(call?.gananciaTotal).toBe('1000'); // 83.3333 * 12
   });
 
   it('lanza error con índice inválido (no existe)', async () => {
@@ -189,7 +192,7 @@ describe('agregarStock', () => {
 
     await expect(
       agregarStock(
-        { usuarioId: 'user-1', productoIndice: 99, cantidadNueva: 5 },
+        { usuarioId: 'user-1', productoIndice: 99, cantidadNueva: 5, costoLote: 1000, precioVenta: 200 },
         { prisma, compraRepo, itemCompraRepo },
       ),
     ).rejects.toThrow('No existe producto con índice 99');
@@ -208,7 +211,7 @@ describe('agregarStock', () => {
 
     await expect(
       agregarStock(
-        { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: 0 },
+        { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: 0, costoLote: 1000, precioVenta: 200 },
         { prisma, compraRepo, itemCompraRepo },
       ),
     ).rejects.toThrow('La cantidad tiene que ser mayor a cero');
@@ -225,7 +228,7 @@ describe('agregarStock', () => {
 
     await expect(
       agregarStock(
-        { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: -3 },
+        { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: -3, costoLote: 1000, precioVenta: 200 },
         { prisma, compraRepo, itemCompraRepo },
       ),
     ).rejects.toThrow('La cantidad tiene que ser mayor a cero');
@@ -238,14 +241,14 @@ describe('agregarStock', () => {
 
     await expect(
       agregarStock(
-        { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: 5 },
+        { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: 5, costoLote: 1000, precioVenta: 200 },
         { prisma, compraRepo, itemCompraRepo },
       ),
     ).rejects.toThrow('No existe producto con índice 1');
   });
 
-  it('usa el costo/precio más reciente del producto (primero tras orderBy desc)', async () => {
-    // Two items with same name but different costs — the first one (most recent) is used
+  it('usa el costo/precio provisto por el usuario (no el del producto existente)', async () => {
+    // Two items with same name but different costs — user provides THEIR cost
     const prisma = buildMockPrisma([
       { nombre: 'gorras', costoLote: 6000, precioVenta: 9000, unidad: 'UNIDAD' },
       { nombre: 'gorras', costoLote: 5000, precioVenta: 8000, unidad: 'UNIDAD' },
@@ -254,12 +257,117 @@ describe('agregarStock', () => {
     const itemCompraRepo = buildMockItemCompraRepo();
 
     await agregarStock(
-      { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: 10 },
+      { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: 10, costoLote: 3000, precioVenta: 500 },
       { prisma, compraRepo, itemCompraRepo },
     );
 
     const call = itemCompraRepo.createMany.mock.calls[0]?.[0]?.[0];
-    expect(call?.costoLote).toBe('6000.00'); // most recent
-    expect(call?.precioVenta).toBe('9000.00'); // most recent
+    expect(call?.costoLote).toBe('3000.00'); // user-provided, NOT the product's 6000
+    expect(call?.precioVenta).toBe('500.00'); // user-provided, NOT the product's 9000
+  });
+
+  it('lanza error con costoLote <= 0', async () => {
+    const prisma = buildMockPrisma([
+      { nombre: 'medias negras', costoLote: 1200, precioVenta: 1500, unidad: 'PAR' },
+    ]);
+    const compraRepo = buildMockCompraRepo();
+    const itemCompraRepo = buildMockItemCompraRepo();
+
+    await expect(
+      agregarStock(
+        { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: 12, costoLote: 0, precioVenta: 200 },
+        { prisma, compraRepo, itemCompraRepo },
+      ),
+    ).rejects.toThrow('El costo del lote tiene que ser mayor a cero');
+
+    expect(compraRepo.create).not.toHaveBeenCalled();
+  });
+
+  it('lanza error con precioVenta <= 0', async () => {
+    const prisma = buildMockPrisma([
+      { nombre: 'medias negras', costoLote: 1200, precioVenta: 1500, unidad: 'PAR' },
+    ]);
+    const compraRepo = buildMockCompraRepo();
+    const itemCompraRepo = buildMockItemCompraRepo();
+
+    await expect(
+      agregarStock(
+        { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: 12, costoLote: 1000, precioVenta: 0 },
+        { prisma, compraRepo, itemCompraRepo },
+      ),
+    ).rejects.toThrow('El precio de venta tiene que ser mayor a cero');
+
+    expect(compraRepo.create).not.toHaveBeenCalled();
+  });
+
+  it('lanza error con costoLote negativo', async () => {
+    const prisma = buildMockPrisma([
+      { nombre: 'medias negras', costoLote: 1200, precioVenta: 1500, unidad: 'PAR' },
+    ]);
+    const compraRepo = buildMockCompraRepo();
+    const itemCompraRepo = buildMockItemCompraRepo();
+
+    await expect(
+      agregarStock(
+        { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: 12, costoLote: -500, precioVenta: 200 },
+        { prisma, compraRepo, itemCompraRepo },
+      ),
+    ).rejects.toThrow('El costo del lote tiene que ser mayor a cero');
+  });
+
+  it('lanza error con precioVenta negativo', async () => {
+    const prisma = buildMockPrisma([
+      { nombre: 'medias negras', costoLote: 1200, precioVenta: 1500, unidad: 'PAR' },
+    ]);
+    const compraRepo = buildMockCompraRepo();
+    const itemCompraRepo = buildMockItemCompraRepo();
+
+    await expect(
+      agregarStock(
+        { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: 12, costoLote: 1000, precioVenta: -100 },
+        { prisma, compraRepo, itemCompraRepo },
+      ),
+    ).rejects.toThrow('El precio de venta tiene que ser mayor a cero');
+  });
+
+  it('crea lote independiente con mismo costo que el existente', async () => {
+    const prisma = buildMockPrisma([
+      { nombre: 'gorras', costoLote: 5000, precioVenta: 8000, unidad: 'UNIDAD' },
+    ]);
+    const compraRepo = buildMockCompraRepo();
+    const itemCompraRepo = buildMockItemCompraRepo();
+
+    await agregarStock(
+      { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: 5, costoLote: 5000, precioVenta: 8000 },
+      { prisma, compraRepo, itemCompraRepo },
+    );
+
+    // Verificar que se creó una compra nueva (independiente)
+    expect(compraRepo.create).toHaveBeenCalledTimes(1);
+    expect(compraRepo.create).toHaveBeenCalledWith({ usuarioId: 'user-1' });
+
+    // Verificar que el item tiene el mismo costo que el existente
+    const call = itemCompraRepo.createMany.mock.calls[0]?.[0]?.[0];
+    expect(call?.costoLote).toBe('5000.00');
+    expect(call?.precioVenta).toBe('8000.00');
+    expect(call?.costoUnitario).toBe('1000'); // 5000/5
+  });
+
+  it('crea ItemCompra con costoUnitario = costoLote / cantidadNueva', async () => {
+    const prisma = buildMockPrisma([
+      { nombre: 'cajas', costoLote: 3000, precioVenta: 4500, unidad: 'CAJA' },
+    ]);
+    const compraRepo = buildMockCompraRepo();
+    const itemCompraRepo = buildMockItemCompraRepo();
+
+    await agregarStock(
+      { usuarioId: 'user-1', productoIndice: 1, cantidadNueva: 6, costoLote: 3000, precioVenta: 600 },
+      { prisma, compraRepo, itemCompraRepo },
+    );
+
+    const call = itemCompraRepo.createMany.mock.calls[0]?.[0]?.[0];
+    expect(call?.costoUnitario).toBe('500'); // 3000/6
+    expect(call?.gananciaUnitaria).toBe('100'); // 600 - 500
+    expect(call?.gananciaTotal).toBe('600'); // 100 * 6
   });
 });

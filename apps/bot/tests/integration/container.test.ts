@@ -59,16 +59,23 @@ function buildFakePrisma(): PrismaClientLike & { $disconnect: () => Promise<void
       create: vi.fn(async () => null),
       findUnique: vi.fn(async () => null),
       findMany: vi.fn(async () => []),
+      deleteMany: vi.fn(async () => ({ count: 0 })),
     },
     itemCompra: {
       createMany: vi.fn(async () => ({ count: 0 })),
       findMany: vi.fn(async () => []),
       findFirst: vi.fn(async () => null),
+      update: vi.fn(async () => null),
+      deleteMany: vi.fn(async () => ({ count: 0 })),
     },
     conversacion: {
       findUnique: vi.fn(async () => null),
       upsert: vi.fn(async () => null),
       update: vi.fn(async () => null),
+    },
+    venta: {
+      create: vi.fn(async () => null),
+      findMany: vi.fn(async () => []),
     },
     $queryRaw: vi.fn(async () => []),
     $disconnect: vi.fn(async () => undefined),

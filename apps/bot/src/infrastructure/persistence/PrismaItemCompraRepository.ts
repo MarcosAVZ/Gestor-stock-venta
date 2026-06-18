@@ -71,6 +71,65 @@ export class PrismaItemCompraRepository implements ItemCompraRepository {
     )) as Array<ItemCompra & { similarity: number }>;
     return rows[0] ?? null;
   }
+
+  async updateById(
+    id: string,
+    data: Partial<{
+      nombre: string;
+      cantidadLote: number;
+      unidad: string;
+      costoLote: string;
+      costoUnitario: string;
+      precioVenta: string;
+      gananciaUnitaria: string;
+      gananciaTotal: string;
+    }>,
+  ): Promise<ItemCompra> {
+    const dbAny = this.db as unknown as {
+      itemCompra: { update: (a: unknown) => Promise<ItemCompra> };
+    };
+    return dbAny.itemCompra.update({
+      where: { id },
+      data,
+    });
+  }
+
+  async deleteByNombreAndUsuarioId(nombre: string, usuarioId: string): Promise<number> {
+    // Buscamos los IDs de las compras del usuario que tienen items con ese nombre
+    const comprasConItem = await this.db.compra.findMany({
+      where: { usuarioId },
+      select: { id: true },
+    }) as Array<{ id: string }>;
+
+    if (comprasConItem.length === 0) return 0;
+
+    // Eliminamos los items con ese nombre en las compras del usuario
+    const dbAny = this.db as unknown as {
+      itemCompra: {
+        deleteMany: (a: unknown) => Promise<{ count: number }>;
+      };
+    };
+    const result = await dbAny.itemCompra.deleteMany({
+      where: {
+        nombre: nombre.toLowerCase(),
+        compraId: { in: comprasConItem.map((c) => c.id) },
+      },
+    });
+
+    // Limpiamos compras que quedaron sin items
+    const comprasVacias = await this.db.compra.findMany({
+      where: { usuarioId },
+      select: { id: true, items: { select: { id: true } } },
+    }) as Array<{ id: string; items: Array<{ id: string }> }>;
+
+    for (const c of comprasVacias) {
+      if (c.items.length === 0) {
+        await this.db.compra.deleteMany({ where: { id: c.id } });
+      }
+    }
+
+    return result.count;
+  }
 }
 
 // Helper exportado para tests que quieran instanciar con el client real

@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   await prisma.conversacion.create({
     data: {
       usuarioId: demo.id,
-      estado: ConversationState.ESPERANDO_IMAGEN,
+      estado: ConversationState.PREGUNTANDO_PRODUCTO,
       datosTemporales: {},
     },
   });
