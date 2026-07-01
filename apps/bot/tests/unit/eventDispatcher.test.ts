@@ -73,6 +73,7 @@ function buildFakePort(): FakePort {
       sentTexts.set(to, list);
     },
     sendImage: async () => undefined,
+    sendDocument: async () => undefined,
     downloadMedia: async () => Buffer.from(''),
     onIncomingMessage: () => undefined,
     destroy: async () => undefined,

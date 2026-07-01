@@ -175,6 +175,24 @@ describe('WhatsAppWebJsAdapter', () => {
     // verificando que requiere ready.
   });
 
+  describe('sendDocument()', () => {
+    it('throws if not ready', async () => {
+      await expect(
+        adapter.sendDocument('+5491112345678', '/tmp/datos.xlsx'),
+      ).rejects.toThrow(/not ready/);
+    });
+
+    it('throws if not ready with options', async () => {
+      await expect(
+        adapter.sendDocument('+5491112345678', '/tmp/datos.xlsx', {
+          filename: 'export.xlsx',
+          caption: 'Acá están los datos',
+        }),
+      ).rejects.toThrow(/not ready/);
+    });
+
+  });
+
   describe('downloadMedia()', () => {
     it('decodes base64 to Buffer (PR4: ya no escribe a disco)', async () => {
       void fakeClient.emit('ready');
@@ -360,6 +378,7 @@ describe('WhatsAppWebJsAdapter', () => {
       expect(typeof port.initialize).toBe('function');
       expect(typeof port.sendText).toBe('function');
       expect(typeof port.sendImage).toBe('function');
+      expect(typeof port.sendDocument).toBe('function');
       expect(typeof port.downloadMedia).toBe('function');
       expect(typeof port.onIncomingMessage).toBe('function');
       expect(typeof port.destroy).toBe('function');

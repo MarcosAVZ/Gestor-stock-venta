@@ -66,6 +66,8 @@ export interface WhatsAppMessagingPort {
   sendText(to: string, text: string): Promise<void>;
   /** Envía una imagen desde un path local a un chat. */
   sendImage(to: string, filePath: string, caption?: string): Promise<void>;
+  /** Envía un documento desde un path local a un chat. */
+  sendDocument(to: string, filePath: string, options?: { filename?: string; caption?: string }): Promise<void>;
   /** Descarga la media de un mensaje y devuelve el buffer.
    *  PR4: el port ya NO escribe a disco — esa responsabilidad
    *  Beneficios: el port es simétrico, testeable con mocks
@@ -175,6 +177,27 @@ export class WhatsAppWebJsAdapter implements WhatsAppMessagingPort {
     this.logger.info(
       { event: 'whatsapp_message_sent', type: 'image', chatId, path: filePath },
       'image sent',
+    );
+  }
+
+  async sendDocument(
+    to: string,
+    filePath: string,
+    options?: { filename?: string; caption?: string },
+  ): Promise<void> {
+    this.assertReady();
+    const chatId = this.toChatId(to);
+    const { MessageMedia } = await import('whatsapp-web.js').then(m => m.default ?? m);
+    const media = await MessageMedia.fromFilePath(filePath);
+    // Set a custom filename in the media object so WhatsApp shows it in chat.
+    media.filename = options?.filename ?? 'datos.xlsx';
+    await this.client.sendMessage(chatId, media, {
+      sendMediaAsDocument: true,
+      caption: options?.caption ?? '',
+    });
+    this.logger.info(
+      { event: 'whatsapp_message_sent', type: 'document', chatId, path: filePath, filename: options?.filename ?? 'datos.xlsx' },
+      'document sent',
     );
   }
 
