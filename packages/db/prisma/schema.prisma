@@ -60,6 +60,11 @@ enum ConversationState {
   VENDIENDO_SELECCION
   VENDIENDO_CANTIDAD
   VENDIENDO_CONFIRMACION
+  SELECCIONANDO_PRODUCTO_GRUPO
+  ASIGNANDO_GRUPO
+  SELECCIONANDO_GRUPO
+  IMPORTANDO_ESPERANDO_ARCHIVO
+  IMPORTANDO_REVISANDO
 }
 
 // ── Modelos ──────────────────────────────────────────────────────────
@@ -117,6 +122,15 @@ model Conversacion {
   usuario         Usuario           @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 
   @@index([estado])
+}
+
+model GrupoProducto {
+  productoNombre String   @id
+  grupoNombre    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([grupoNombre])
 }
 
 model Venta {

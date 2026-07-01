@@ -19,6 +19,8 @@ describe('ConversationState enum sync with Prisma', () => {
       'CONFIRMACION_FINAL',
       'GUARDADO',
       'AGREGANDO_STOCK',
+      'IMPORTANDO_ESPERANDO_ARCHIVO',
+      'IMPORTANDO_REVISANDO',
     ] as const;
 
     for (const state of expected) {
@@ -34,9 +36,9 @@ describe('ConversationState enum sync with Prisma', () => {
     }
   });
 
-  it('has exactly 16 states (no extra, no missing)', () => {
+  it('has exactly 21 states (no extra, no missing)', () => {
     const keys = Object.keys(ConversationState);
-    expect(keys).toHaveLength(16);
+    expect(keys).toHaveLength(21);
   });
 
   it('values match their keys (string enum pattern)', () => {
