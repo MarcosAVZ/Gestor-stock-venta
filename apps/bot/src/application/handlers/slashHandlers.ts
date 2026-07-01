@@ -20,6 +20,7 @@ import { ConversationState } from '@compras-whatsapp/db';
 import type { BotCommand } from '../commands/parseCommand.ts';
 import type { HandlerContext } from './HandlerContext.ts';
 import { HELP_TEXT } from '../queries/index.ts';
+import { handleImportarInit } from './importHandlers.ts';
 
 export interface SlashHandlerOutput {
   responses: string[];
@@ -50,6 +51,8 @@ export async function handleSlashCommand(
       return venderHandler(ctx);
     case 'exportar':
       return exportarHandler(ctx);
+    case 'importar':
+      return importarHandler(ctx);
   }
 }
 
@@ -174,4 +177,8 @@ async function exportarHandler(ctx: HandlerContext): Promise<SlashHandlerOutput>
     newState: ctx.workingState,
     rejected: false,
   };
+}
+
+async function importarHandler(ctx: HandlerContext): Promise<SlashHandlerOutput> {
+  return handleImportarInit(ctx);
 }

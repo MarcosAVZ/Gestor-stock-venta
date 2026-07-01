@@ -28,6 +28,7 @@ function buildMockCtx(overrides: Partial<HandlerContext> = {}): HandlerContext {
     prisma: {} as any,
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any,
     exportService: { exportToFile: vi.fn(), exportAndSend: vi.fn() } as any,
+    importService: { parse: vi.fn(), applyChanges: vi.fn() } as any,
     chatId: '5491112345678@c.us',
     ...overrides,
   };
@@ -146,6 +147,17 @@ describe('slashHandlers — handleSlashCommand', () => {
       const ctx = buildMockCtx();
       const result = await handleSlashCommand({ type: 'vender' }, ctx);
       expect(result.responses[0]).toMatch(/No tenés productos con stock/);
+    });
+  });
+
+  describe('/importar', () => {
+    it('sets state to IMPORTANDO_ESPERANDO_ARCHIVO and asks for file', async () => {
+      const ctx = buildMockCtx();
+      const result = await handleSlashCommand({ type: 'importar' }, ctx);
+
+      expect(result.newState).toBe(ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO);
+      expect(result.responses[0]).toMatch(/archivo/i);
+      expect(result.rejected).toBe(false);
     });
   });
 
