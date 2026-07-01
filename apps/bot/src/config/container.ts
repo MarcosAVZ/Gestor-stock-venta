@@ -35,6 +35,7 @@ import {
   buildWhatsAppAdapter,
   type WhatsAppMessagingPort,
 } from '../infrastructure/messaging/WhatsAppClient.ts';
+import { ExportService } from '../application/excel/ExportService.ts';
 import type { PrismaClientLike } from '../infrastructure/persistence/PrismaClientLike.ts';
 import { PrismaCompraRepository } from '../infrastructure/persistence/PrismaCompraRepository.ts';
 import { PrismaConversacionRepository } from '../infrastructure/persistence/PrismaConversacionRepository.ts';
@@ -155,6 +156,9 @@ export async function buildContainer(opts: ContainerOptions = {}): Promise<AppCo
     ? await opts.whatsappFactory(env, logger)
     : await buildWhatsAppAdapter({ sessionPath: env.SESSION_PATH }, logger);
 
+  // 6.5. Build ExportService
+  const exportService = new ExportService(prisma, logger, whatsappPort);
+
   // 7. Build dispatcher con el port real.
   const dispatcher = buildEventDispatcher({
     port: whatsappPort,
@@ -168,6 +172,7 @@ export async function buildContainer(opts: ContainerOptions = {}): Promise<AppCo
     queryDeps: { prisma, logger },
     whitelist,
     inactivityTimeoutMs,
+    exportService,
   });
 
   // 8. Registrar el handler del dispatcher en el port.

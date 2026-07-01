@@ -48,6 +48,8 @@ export async function handleSlashCommand(
       return ayudaHandler(ctx);
     case 'vender':
       return venderHandler(ctx);
+    case 'exportar':
+      return exportarHandler(ctx);
   }
 }
 
@@ -161,6 +163,15 @@ async function venderHandler(ctx: HandlerContext): Promise<SlashHandlerOutput> {
   return {
     responses: [lista],
     newState: ConversationState.VENDIENDO_SELECCION,
+    rejected: false,
+  };
+}
+
+async function exportarHandler(ctx: HandlerContext): Promise<SlashHandlerOutput> {
+  await ctx.exportService.exportAndSend(ctx.usuarioId, ctx.chatId);
+  return {
+    responses: ['📎 Excel exportado con todos los datos'],
+    newState: ctx.workingState,
     rejected: false,
   };
 }

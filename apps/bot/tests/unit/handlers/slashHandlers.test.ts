@@ -27,6 +27,8 @@ function buildMockCtx(overrides: Partial<HandlerContext> = {}): HandlerContext {
     ventaRepo: {} as any,
     prisma: {} as any,
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any,
+    exportService: { exportToFile: vi.fn(), exportAndSend: vi.fn() } as any,
+    chatId: '5491112345678@c.us',
     ...overrides,
   };
 }
@@ -144,6 +146,27 @@ describe('slashHandlers — handleSlashCommand', () => {
       const ctx = buildMockCtx();
       const result = await handleSlashCommand({ type: 'vender' }, ctx);
       expect(result.responses[0]).toMatch(/No tenés productos con stock/);
+    });
+  });
+
+  describe('/exportar', () => {
+    it('calls exportAndSend with usuarioId and chatId', async () => {
+      const ctx = buildMockCtx();
+      const result = await handleSlashCommand({ type: 'exportar' }, ctx);
+
+      expect(ctx.exportService.exportAndSend).toHaveBeenCalledWith('user-1', '5491112345678@c.us');
+      expect(result.responses[0]).toMatch(/Excel exportado/i);
+      expect(result.newState).toBe(ctx.workingState);
+      expect(result.rejected).toBe(false);
+    });
+
+    it('returns error message when export fails', async () => {
+      const ctx = buildMockCtx();
+      ctx.exportService.exportAndSend = vi.fn().mockRejectedValue(new Error('export failed'));
+
+      await expect(
+        handleSlashCommand({ type: 'exportar' }, ctx),
+      ).rejects.toThrow('export failed');
     });
   });
 });

@@ -35,6 +35,8 @@ function buildMockCtx(overrides: Partial<HandlerContext> = {}): HandlerContext {
     } as any,
     prisma: {} as any,
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any,
+    exportService: { exportToFile: vi.fn(), exportAndSend: vi.fn() } as any,
+    chatId: '5491112345678@c.us',
     ...overrides,
   };
 }

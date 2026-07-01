@@ -146,6 +146,7 @@ function buildDeps(port: WhatsAppMessagingPort) {
     ventaRepo: { create: vi.fn(), findByUsuarioId: vi.fn(), findByProductoNombre: vi.fn(), sumIngresos: vi.fn(), sumGananciaTotal: vi.fn() } as never,
     queryDeps: { prisma: buildMockPrisma() as never, logger: silentLogger() },
     whitelist: new Set(['+5491112345678']),
+    exportService: { exportToFile: vi.fn(), exportAndSend: vi.fn() } as any,
   };
 }
 

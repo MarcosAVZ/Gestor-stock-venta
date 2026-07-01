@@ -47,6 +47,7 @@ import { handleSlashCommand } from '../handlers/slashHandlers.ts';
 import { inputToEvent } from '../handlers/inputMapper.ts';
 import { renderAccion, applyAccionToDatos } from '../handlers/actionRenderer.ts';
 import { handleSpecialCase } from '../handlers/stateHandlers.ts';
+import type { ExportService } from '../excel/ExportService.ts';
 import type { HandlerContext } from '../handlers/HandlerContext.ts';
 
 // ── Input/Output ────────────────────────────────────────────────────
@@ -74,6 +75,7 @@ export interface HandleIncomingMessageDeps {
   whitelist: ReadonlySet<string>;
   inactivityTimeoutMs?: number;
   clock?: () => number;
+  exportService: ExportService;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -161,6 +163,8 @@ export async function handleIncomingMessage(
       itemCompraRepo: deps.itemCompraRepo,
       ventaRepo: deps.ventaRepo,
       prisma: queryDeps.prisma, logger,
+      exportService: deps.exportService,
+      chatId: `${input.phone}@c.us`,
     };
     const slashResult = await handleSlashCommand(slashCmd, ctx);
     rateLimiter.recordMessage(normalizedPhone, now);
@@ -194,6 +198,8 @@ export async function handleIncomingMessage(
     itemCompraRepo: deps.itemCompraRepo,
     ventaRepo: deps.ventaRepo,
     prisma: queryDeps.prisma, logger,
+    exportService: deps.exportService,
+    chatId: `${input.phone}@c.us`,
   };
   const specialResult = await handleSpecialCase({ workingState, event, workingDatos, ctx });
   if (specialResult !== null) {
