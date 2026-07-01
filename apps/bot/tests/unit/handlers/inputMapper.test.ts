@@ -293,6 +293,41 @@ describe('inputMapper — inputToEvent', () => {
     });
   });
 
+  // ── IMPORTANDO_REVISANDO ─────────────────────────────────────────
+
+  describe('IMPORTANDO_REVISANDO', () => {
+    it('"sí" returns CONFIRMAR_IMPORT event', () => {
+      const result = inputToEvent(makeInput('sí'), ConversationState.IMPORTANDO_REVISANDO, {});
+      expect(result).toEqual({ event: { type: 'CONFIRMAR_IMPORT' }, datosPatch: {} });
+    });
+
+    it('"si" returns CONFIRMAR_IMPORT event', () => {
+      const result = inputToEvent(makeInput('si'), ConversationState.IMPORTANDO_REVISANDO, {});
+      expect(result?.event.type).toBe('CONFIRMAR_IMPORT');
+    });
+
+    it('"no" returns CANCELAR_IMPORT event', () => {
+      const result = inputToEvent(makeInput('no'), ConversationState.IMPORTANDO_REVISANDO, {});
+      expect(result).toEqual({ event: { type: 'CANCELAR_IMPORT' }, datosPatch: {} });
+    });
+
+    it('"SÍ" with uppercase still matches', () => {
+      const result = inputToEvent(makeInput('SÍ'), ConversationState.IMPORTANDO_REVISANDO, {});
+      expect(result?.event.type).toBe('CONFIRMAR_IMPORT');
+    });
+
+    it('other text returns null (falls through)', () => {
+      const result = inputToEvent(makeInput('abc'), ConversationState.IMPORTANDO_REVISANDO, {});
+      expect(result).toBeNull();
+    });
+
+    it('does not break yes/no in CONFIRMACION_FINAL', () => {
+      // Regression: general si/no must still work for other states
+      const result = inputToEvent(makeInput('sí'), ConversationState.CONFIRMACION_FINAL, {});
+      expect(result?.event.type).toBe('USUARIO_CONFIRMA');
+    });
+  });
+
   // ── null mapping ────────────────────────────────────────────────
 
   describe('unmapped input', () => {

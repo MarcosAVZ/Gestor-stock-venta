@@ -200,6 +200,18 @@ export function inputToEvent(
     }
   }
 
+  // IMPORTANDO_REVISANDO: si/no → CONFIRMAR_IMPORT or CANCELAR_IMPORT
+  // Placed BEFORE general si/no handler to intercept import confirm/cancel
+  if (state === ConversationState.IMPORTANDO_REVISANDO) {
+    const siNo = opcionSiNoSchema.safeParse(lower);
+    if (siNo.success) {
+      return {
+        event: siNo.data === 'si' ? { type: 'CONFIRMAR_IMPORT' } : { type: 'CANCELAR_IMPORT' },
+        datosPatch: {},
+      };
+    }
+  }
+
   // VENDIENDO_CONFIRMACION: si/no → CONFIRMAR_PRECIO_VENTA or USUARIO_RECHAZA
   // Placed AFTER state-specific handlers so "1" in VENDIENDO_SELECCION
   // maps to SELECCIONAR_PRODUCTO_VENTA, not USUARIO_CONFIRMA.
