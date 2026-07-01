@@ -56,6 +56,8 @@ function makeFakeMessage(
     hasMedia: boolean;
     isStatus: boolean;
     idSerialized: string;
+    type: string;
+    mimetype: string;
     downloadMedia: () => Promise<{ data: string; mimetype: string; filename?: string }>;
   }> = {},
 ) {
@@ -66,6 +68,8 @@ function makeFakeMessage(
     hasMedia: overrides.hasMedia ?? false,
     isStatus: overrides.isStatus ?? false,
     id: { _serialized: overrides.idSerialized ?? 'fake-id-1' },
+    type: overrides.type ?? 'chat',
+    mimetype: overrides.mimetype,
     downloadMedia:
       overrides.downloadMedia ??
       (async () => ({ data: '', mimetype: 'image/jpeg' })),
@@ -249,6 +253,39 @@ describe('WhatsAppWebJsAdapter', () => {
       void fakeClient.emit('message', makeFakeMessage({ hasMedia: true, body: '' }));
       await new Promise((r) => setImmediate(r));
       expect(received[0]?.type).toBe('image');
+    });
+
+    it('marks type=document and mimetype for document messages', async () => {
+      const received: IncomingMessage[] = [];
+      adapter.onIncomingMessage((m) => {
+        received.push(m);
+      });
+      void fakeClient.emit(
+        'message',
+        makeFakeMessage({
+          hasMedia: true,
+          type: 'document',
+          mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          body: '',
+        }),
+      );
+      await new Promise((r) => setImmediate(r));
+      expect(received[0]?.type).toBe('document');
+      expect(received[0]?.mimetype).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    });
+
+    it('marks type=text for chat messages (type=chat)', async () => {
+      const received: IncomingMessage[] = [];
+      adapter.onIncomingMessage((m) => {
+        received.push(m);
+      });
+      void fakeClient.emit(
+        'message',
+        makeFakeMessage({ type: 'chat', body: 'hola', hasMedia: false }),
+      );
+      await new Promise((r) => setImmediate(r));
+      expect(received[0]?.type).toBe('text');
+      expect(received[0]?.mimetype).toBeUndefined();
     });
 
     it('drops messages from self (fromMe)', async () => {

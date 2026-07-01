@@ -41,12 +41,14 @@ export interface IncomingMessage {
   from: string;
   /** Phone "limpio" (solo dígitos, sin @c.us) para comparar con whitelist. */
   phone: string;
-  /** Tipo: texto o imagen. */
-  type: 'text' | 'image';
+  /** Tipo: texto, imagen o documento. */
+  type: 'text' | 'image' | 'document';
   /** Body del mensaje (solo si type=text). */
   body?: string;
   /** True si tiene media adjunta (imagen, video, etc.). */
   hasMedia: boolean;
+  /** MIME type del media adjunto (solo si type=document o image). */
+  mimetype?: string;
   /** ID único del mensaje (para ack/correlación). */
   id: string;
   /** Mensaje crudo de whatsapp-web.js (escape hatch para download). */
@@ -324,13 +326,27 @@ export class WhatsAppWebJsAdapter implements WhatsAppMessagingPort {
       }
 
       const hasMedia = Boolean(msg.hasMedia);
-      const type: 'text' | 'image' = hasMedia ? 'image' : 'text';
+      // Use msg.type (MessageTypes enum: 'chat', 'image', 'document', etc.)
+      // to distinguish between image and document.
+      const rawType = (msg as { type?: string }).type ?? '';
+      let type: 'text' | 'image' | 'document';
+      if (rawType === 'document') {
+        type = 'document';
+      } else if (hasMedia || rawType === 'image') {
+        type = 'image';
+      } else {
+        type = 'text';
+      }
+      // Attempt to read mimetype from the message (runtime property on
+      // whatsapp-web.js Message, not always present in TS types).
+      const mimetype = (msg as { mimetype?: string }).mimetype;
       const incoming: IncomingMessage = {
         from,
         phone,
         type,
         body: msg.body,
         hasMedia,
+        mimetype,
         id: msg.id._serialized,
         raw: msg,
       };
