@@ -156,7 +156,7 @@ const TWO_VENTAS = [
     costoUnitario: 103.33,
     gananciaUnitaria: 96.67,
     gananciaTotal: 2900.1,
-    createdAt: new Date('2025-01-20'),
+    fecha: new Date('2025-01-20'),
   },
   {
     id: 'venta-2',
@@ -167,7 +167,7 @@ const TWO_VENTAS = [
     costoUnitario: 150,
     gananciaUnitaria: 100,
     gananciaTotal: 2000,
-    createdAt: new Date('2025-01-25'),
+    fecha: new Date('2025-01-25'),
   },
 ];
 

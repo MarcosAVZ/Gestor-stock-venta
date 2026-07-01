@@ -62,7 +62,7 @@ interface VentaRaw {
   precioVenta: unknown;
   costoUnitario: unknown;
   gananciaTotal: unknown;
-  createdAt: Date;
+  fecha: Date;
 }
 
 interface StockInfo {
@@ -177,7 +177,7 @@ export class ExportService {
       }) as Promise<CompraRaw[]>,
       this.prisma.venta.findMany({
         where: { usuarioId },
-        orderBy: { createdAt: 'desc' as const },
+        orderBy: { fecha: 'desc' as const },
       }) as Promise<VentaRaw[]>,
     ]);
     return [compras ?? [], ventas ?? []];
@@ -292,7 +292,7 @@ export class ExportService {
 
     for (const v of ventas) {
       sheet.addRow({
-        fecha: fmtDate(v.createdAt),
+        fecha: fmtDate(v.fecha),
         producto: v.productoNombre,
         cantidad: v.cantidad,
         precio_venta: toNumber(v.precioVenta),
