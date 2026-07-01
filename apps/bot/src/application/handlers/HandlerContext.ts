@@ -21,6 +21,7 @@ import type { ItemCompraRepository } from '../../domain/repositories/ItemCompraR
 import type { VentaRepository } from '../../domain/repositories/VentaRepository.ts';
 import type { PrismaClientLike } from '../../infrastructure/persistence/PrismaClientLike.ts';
 import type { ExportService } from '../excel/ExportService.ts';
+import type { ImportService } from '../excel/ImportService.ts';
 
 export interface HandlerContext {
   /** ID del usuario autenticado. */
@@ -43,6 +44,8 @@ export interface HandlerContext {
   logger: Logger;
   /** Servicio de exportación a Excel. */
   exportService: ExportService;
+  /** Servicio de importación desde Excel. */
+  importService: ImportService;
   /** Chat ID de WhatsApp (e.g. "5491112345678@c.us"). */
   chatId: string;
 }
