@@ -48,6 +48,7 @@ import { inputToEvent } from '../handlers/inputMapper.ts';
 import { renderAccion, applyAccionToDatos } from '../handlers/actionRenderer.ts';
 import { handleSpecialCase } from '../handlers/stateHandlers.ts';
 import type { ExportService } from '../excel/ExportService.ts';
+import type { ImportService } from '../excel/ImportService.ts';
 import type { HandlerContext } from '../handlers/HandlerContext.ts';
 
 // ── Input/Output ────────────────────────────────────────────────────
@@ -76,6 +77,7 @@ export interface HandleIncomingMessageDeps {
   inactivityTimeoutMs?: number;
   clock?: () => number;
   exportService: ExportService;
+  importService: ImportService;
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────

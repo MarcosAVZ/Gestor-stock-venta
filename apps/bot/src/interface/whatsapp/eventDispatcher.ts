@@ -21,6 +21,7 @@
  *   - Persistencia de Conversacion (lo hace el use case).
  */
 
+import { ConversationState } from '@compras-whatsapp/db';
 import type { Logger } from 'pino';
 
 import {
@@ -28,6 +29,8 @@ import {
   type HandleIncomingMessageOutput,
   handleIncomingMessage,
 } from '../../application/conversation/HandleIncomingMessage.ts';
+import { handleDocumentoRecibido } from '../../application/handlers/importHandlers.ts';
+import type { HandlerContext } from '../../application/handlers/HandlerContext.ts';
 import { logSecurityEvent } from '../../infrastructure/logging/logger.ts';
 import type {
   IncomingMessage,
@@ -90,7 +93,13 @@ export function buildEventDispatcher(deps: EventDispatcherDeps): EventDispatcher
       'dispatcher: incoming message',
     );
 
-    // Map to text-only input
+    // ── Document handling (import flow) ────────────────────────────
+    if (msg.type === 'document' && msg.hasMedia) {
+      await handleDocumentMessage(phone, chatId, msg, port, useCaseDeps, logger);
+      return;
+    }
+
+    // ── Text (or image without dedicated handler) ──────────────────
     const input = { phone, type: 'text' as const, body: msg.body ?? '' };
 
     // Call use case with defensive try/catch
@@ -150,6 +159,113 @@ async function safeSendText(
       err: err instanceof Error ? err.message : String(err),
     });
     return false;
+  }
+}
+
+/**
+ * Maneja un mensaje de tipo document (posible Excel para importar).
+ * Descarga el buffer, verifica MIME, y si es Excel válido delega a
+ * handleDocumentoRecibido. Si es otro tipo de archivo, informa error.
+ */
+async function handleDocumentMessage(
+  phone: string,
+  chatId: string,
+  msg: IncomingMessage,
+  port: WhatsAppMessagingPort,
+  deps: HandleIncomingMessageDeps,
+  logger: Logger,
+): Promise<void> {
+  // 1. Load conversation to check current state
+  const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
+  let usuarioId: string;
+  try {
+    const usuario = await deps.usuarioRepo.findByTelefono(normalizedPhone);
+    if (!usuario) {
+      await safeSendText(port, chatId, 'Primero enviá un mensaje de texto para registrarte.');
+      return;
+    }
+    usuarioId = usuario.id;
+  } catch (err) {
+    logger.error({ err: (err as Error).message, phone }, 'dispatcher: failed to load user for document');
+    await safeSendText(port, chatId, 'Tuve un error procesando tu archivo. Probá de nuevo.');
+    return;
+  }
+
+  // 2. Load conversation state
+  let conversation: { estado: string; datosTemporales: Record<string, unknown> } | null = null;
+  try {
+    conversation = await deps.conversacionRepo.findByUsuarioId(usuarioId) as any;
+  } catch {
+    // No conversation yet — treat as not in import state
+  }
+
+  const currentState = conversation?.estado ?? '';
+  const isImportState = currentState === ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO;
+
+  // 3. Check MIME type (only Excel files are handled)
+  const isExcel = msg.mimetype?.includes('spreadsheetml') ||
+    msg.mimetype?.includes('excel') ||
+    msg.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+  if (!isExcel) {
+    const response = isImportState
+      ? 'Necesito un archivo Excel (.xlsx) para importar.'
+      : 'No puedo procesar ese tipo de archivo. Enviá solo texto o Excel.';
+    await safeSendText(port, chatId, response);
+    return;
+  }
+
+  // 4. Download buffer
+  let buffer: Buffer;
+  try {
+    buffer = await port.downloadMedia(msg.raw);
+  } catch (err) {
+    logger.error({ err: (err as Error).message, phone }, 'dispatcher: failed to download media');
+    await safeSendText(port, chatId, 'No pude descargar el archivo. Intentá de nuevo.');
+    return;
+  }
+
+  // 5. If not in import state, forward body as text and ignore the Excel content
+  if (!isImportState) {
+    // Treat as text message with body (caption)
+    const input = { phone, type: 'text' as const, body: msg.body ?? '' };
+    try {
+      const output = await handleIncomingMessage(input, deps);
+      for (const response of output.responses) {
+        const sent = await safeSendText(port, chatId, response);
+        if (!sent) break;
+      }
+    } catch {
+      await safeSendText(port, chatId, 'Tuve un error procesando tu mensaje.');
+    }
+    return;
+  }
+
+  // 6. Handle Excel document in IMPORTANDO_ESPERANDO_ARCHIVO
+  const ctx: HandlerContext = {
+    usuarioId,
+    workingState: ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO,
+    workingDatos: (conversation?.datosTemporales as Record<string, unknown>) ?? {},
+    conversacionRepo: deps.conversacionRepo,
+    compraRepo: deps.compraRepo,
+    itemCompraRepo: deps.itemCompraRepo,
+    ventaRepo: deps.ventaRepo,
+    prisma: deps.queryDeps.prisma,
+    logger,
+    exportService: deps.exportService,
+    importService: deps.importService,
+    chatId,
+  };
+
+  try {
+    const output = await handleDocumentoRecibido(ctx, buffer);
+    for (const response of output.responses) {
+      const sent = await safeSendText(port, chatId, response);
+      if (!sent) break;
+    }
+  } catch (err) {
+    logger.error({ err: (err as Error).message, phone }, 'dispatcher: import document handler failed');
+    await safeSendText(port, chatId, 'Tuve un error procesando el archivo Excel. Asegurate de que sea un .xlsx válido.');
   }
 }
 

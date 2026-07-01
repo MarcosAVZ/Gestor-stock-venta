@@ -206,6 +206,7 @@ describe('handleIncomingMessage (WU4 — text-command wiring)', () => {
       },
       whitelist: WHITELIST,
       exportService: { exportToFile: vi.fn(), exportAndSend: vi.fn() } as any,
+      importService: { parse: vi.fn(), applyChanges: vi.fn() } as any,
     };
     // Default: usuario ya existe
     usuarioRepo.findByTelefono.mockResolvedValue({

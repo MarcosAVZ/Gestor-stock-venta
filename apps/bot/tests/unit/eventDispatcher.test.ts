@@ -147,6 +147,7 @@ function buildDeps(port: WhatsAppMessagingPort) {
     queryDeps: { prisma: buildMockPrisma() as never, logger: silentLogger() },
     whitelist: new Set(['+5491112345678']),
     exportService: { exportToFile: vi.fn(), exportAndSend: vi.fn() } as any,
+    importService: { parse: vi.fn(), applyChanges: vi.fn() } as any,
   };
 }
 
@@ -232,6 +233,11 @@ describe('extractPhone', () => {
     expect(extractPhone('5491112345678')).toBe('5491112345678');
   });
 });
+
+// Mock importHandlers for document flow tests
+vi.mock('../../src/application/handlers/importHandlers.ts', () => ({
+  handleDocumentoRecibido: vi.fn(),
+}));
 
 // ── Tests del dispatcher ──────────────────────────────────────────
 
@@ -321,5 +327,91 @@ describe('EventDispatcher', () => {
     const { handle } = buildEventDispatcher(deps);
     await handle(buildIncoming({ type: 'text', body: undefined }));
     expect(port.sentTexts.has('5491112345678@c.us')).toBe(true);
+  });
+
+  // ── Document handling ────────────────────────────────────────────
+
+  describe('document messages (import flow)', () => {
+    it('routes Excel document to handleDocumentoRecibido when in IMPORTANDO_ESPERANDO_ARCHIVO', async () => {
+      const { handleDocumentoRecibido } = await import('../../src/application/handlers/importHandlers.ts');
+      vi.mocked(handleDocumentoRecibido).mockResolvedValue({
+        responses: ['📋 Resumen...', '¿Aplico estos cambios? (sí/no)'],
+        newState: ConversationState.IMPORTANDO_REVISANDO,
+        rejected: false,
+      });
+
+      const port = buildFakePort();
+      const deps = buildDeps(port);
+      deps.conversacionRepo.findByUsuarioId = vi.fn(async () => ({
+        id: 'conv-1',
+        usuarioId: 'u-1',
+        estado: ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO,
+        datosTemporales: {},
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } satisfies Conversacion));
+
+      const { handle } = buildEventDispatcher(deps);
+      await handle(buildIncoming({
+        type: 'document',
+        hasMedia: true,
+        mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        body: '',
+      }));
+
+      const sent = port.sentTexts.get('5491112345678@c.us') ?? [];
+      expect(sent.length).toBeGreaterThan(0);
+      expect(sent[0]).toContain('Resumen');
+    });
+
+    it('responds with error for non-Excel document in import state', async () => {
+      const port = buildFakePort();
+      const deps = buildDeps(port);
+      deps.conversacionRepo.findByUsuarioId = vi.fn(async () => ({
+        id: 'conv-1',
+        usuarioId: 'u-1',
+        estado: ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO,
+        datosTemporales: {},
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } satisfies Conversacion));
+
+      const { handle } = buildEventDispatcher(deps);
+      await handle(buildIncoming({
+        type: 'document',
+        hasMedia: true,
+        mimetype: 'image/png',
+        body: '',
+      }));
+
+      const sent = port.sentTexts.get('5491112345678@c.us') ?? [];
+      expect(sent.some((s) => s.includes('.xlsx'))).toBe(true);
+    });
+
+    it('forwards document body as text when not in import state', async () => {
+      const port = buildFakePort();
+      const deps = buildDeps(port);
+      deps.conversacionRepo.findByUsuarioId = vi.fn(async () => ({
+        id: 'conv-1',
+        usuarioId: 'u-1',
+        estado: ConversationState.PREGUNTANDO_PRODUCTO,
+        datosTemporales: {},
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } satisfies Conversacion));
+
+      // The user is in PREGUNTANDO_PRODUCTO, so the document caption is treated as text
+      const { handle } = buildEventDispatcher(deps);
+      await handle(buildIncoming({
+        type: 'document',
+        hasMedia: true,
+        mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        body: 'hola',
+      }));
+
+      // Should have been processed as text via handleIncomingMessage
+      const sent = port.sentTexts.get('5491112345678@c.us') ?? [];
+      expect(sent.length).toBeGreaterThan(0);
+    });
   });
 });
