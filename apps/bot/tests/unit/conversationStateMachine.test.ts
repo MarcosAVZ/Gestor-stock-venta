@@ -24,7 +24,10 @@ import {
 } from '../../src/interface/whatsapp/conversationStateMachine.ts';
 import { InvariantViolationError } from '../../src/domain/errors/ProgrammerError.ts';
 
-const ALL_STATES = Object.values(ConversationState);
+/** Estados que la state machine conoce actualmente (sin estados de import). */
+const ALL_STATES = Object.values(ConversationState).filter(
+  (s) => s !== ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO && s !== ConversationState.IMPORTANDO_REVISANDO,
+);
 
 describe('conversationStateMachine', () => {
   describe('valid transitions (happy path table)', () => {
@@ -307,6 +310,55 @@ describe('conversationStateMachine', () => {
     });
   });
 
+  describe('ASIGNANDO_GRUPO state', () => {
+    it('ASIGNANDO_GRUPO + NOMBRE_GRUPO_RECIBIDO → PREGUNTANDO_PRODUCTO / GUARDAR_GRUPO', () => {
+      const r = transition(ConversationState.ASIGNANDO_GRUPO, {
+        type: 'NOMBRE_GRUPO_RECIBIDO',
+        valor: 'lácteos',
+      });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.PREGUNTANDO_PRODUCTO,
+        accion: { tipo: 'GUARDAR_GRUPO' },
+      });
+    });
+
+    it('ASIGNANDO_GRUPO + CANCELAR → PREGUNTANDO_PRODUCTO', () => {
+      const r = transition(ConversationState.ASIGNANDO_GRUPO, { type: 'CANCELAR' });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.PREGUNTANDO_PRODUCTO,
+        accion: { tipo: 'RESET', mensaje: 'Listo, cancelé. Empecemos de nuevo.' },
+      });
+    });
+
+    it('ASIGNANDO_GRUPO + MENU → PREGUNTANDO_PRODUCTO', () => {
+      const r = transition(ConversationState.ASIGNANDO_GRUPO, { type: 'MENU' });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.PREGUNTANDO_PRODUCTO,
+        accion: { tipo: 'RESET', mensaje: 'Empecemos de nuevo. Decime: nueva, agregar, ayuda, etc.' },
+      });
+    });
+
+    it('ASIGNANDO_GRUPO + TIMEOUT → PREGUNTANDO_PRODUCTO', () => {
+      const r = transition(ConversationState.ASIGNANDO_GRUPO, { type: 'TIMEOUT' });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.PREGUNTANDO_PRODUCTO,
+        accion: { tipo: 'RESET', mensaje: 'Tu sesión se cerró por inactividad. Mandame un mensaje nuevo.' },
+      });
+    });
+
+    it('ASIGNANDO_GRUPO + PRODUCTO_RECIBIDO → ok: false', () => {
+      const r = transition(ConversationState.ASIGNANDO_GRUPO, {
+        type: 'PRODUCTO_RECIBIDO',
+        valor: 'test',
+      });
+      expect(r.ok).toBe(false);
+    });
+  });
+
   describe('all state-event combinations are covered', () => {
     it('no (state, event) combo panics unexpectedly', () => {
       const events: ConversationEvent[] = [
@@ -323,6 +375,7 @@ describe('conversationStateMachine', () => {
         { type: 'CONFIRMAR_PRECIO_VENTA' },
         { type: 'COSTO_LOTE_AGREGAR_RECIBIDO', valor: 1000 },
         { type: 'CANTIDAD_AGREGAR_RECIBIDA', valor: 1 },
+        { type: 'NOMBRE_GRUPO_RECIBIDO', valor: 'lácteos' },
         { type: 'CANCELAR' },
         { type: 'MENU' },
         { type: 'TIMEOUT' },

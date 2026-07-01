@@ -1,43 +1,19 @@
 /**
- * @compras-whatsapp/bot — 8 query use cases (PR5 task 5.6).
+ * @compras-whatsapp/bot — 5 query use cases consolidados (mejora-visual-estadisticas).
  *
- * Cubre los 8 comandos de consulta definidos en
- * req-query-commands (spec obs#27):
- *   1. resumen            → resumen del mes actual
- *   2. estadisticas       → totales históricos
- *   3. ganancias          → suma de ganancias potenciales
- *   4. productos          → productos únicos cargados
- *   5. stock              → productos únicos con stock total
- *   6. producto <nombre>  → detalle con fuzzy match
- *   7. compras mes        → listado de compras del mes
- *   8. top ganancias      → top N items por gananciaUnitaria
+ * Transforma 12 comandos de consulta en 5 con formato visual emoji-estructurado.
  *
- * Cada use case:
- * - Recibe un `PrismaClientLike` para hacer queries directas de
- *   agregación (SUM, COUNT, GROUP BY). No usa el `CompraRepository`
- *   porque la interfaz solo expone findBy*; las agregaciones son
- *   específicas de cada query.
- * - Retorna un string voseo es-AR listo para enviar por WhatsApp.
- * - Si la DB está vacía, retorna un mensaje de "todavía no cargaste
- *   compras" (no falla, no throw).
- * - Si la query falla, retorna string con error genérico + loguea el
- *   error (no throw — el dispatcher sigue vivo).
+ * Comandos:
+ *   1. estadisticas — Todo en un solo mensaje (reemplaza resumen, estadisticas,
+ *      ganancias, ingresos, ganancia realizada, ganancia potencial, costo promedio)
+ *   2. productos — Lista de productos con stock (reemplaza productos + stock)
+ *   3. producto <nombre> — Detalle con fuzzy match (sin cambios funcionales)
+ *   4. compras — Compras del mes (reemplaza compras mes / compras-mes / compras del mes)
+ *   5. top — Top productos por ganancia (reemplaza top ganancias)
  *
- * POR QUÉ UN SOLO ARCHIVO:
- * - Los 8 use cases son cortos (10-30 líneas c/u) y comparten el
- *   mismo PrismaClientLike + formateo. Tener 8 archivos separados
- *   con su propio index.ts sería ceremony sin valor.
- * - El tests file agrupa todos los tests con mocks compartidos.
- * - Si crece la cantidad de queries, se separan por dominio (ej:
- *   queries/products.ts, queries/stats.ts, queries/singleProduct.ts).
- *
- * OWASP:
- * - Ninguna query expone datos de otros usuarios (todas filtran
- *   por `usuarioId` del input, salvo `top ganancias` que es
- *   cross-usuario por diseño).
- * - Inputs no se persisten (son read-only).
+ * Aliases backward compatibles: todos los nombres viejos siguen funcionando.
  */
-import type { ItemCompra } from '@compras-whatsapp/db';
+import type { ItemCompra, GrupoProducto } from '@compras-whatsapp/db';
 import type { Logger } from 'pino';
 
 import { logSecurityEvent } from '../../infrastructure/logging/logger.ts';
@@ -59,8 +35,7 @@ function fmtArs(n: number | string | { toNumber: () => number }): string {
   return num.toLocaleString('es-AR', { maximumFractionDigits: 2 });
 }
 
-/** Helper para extraer un numero de un Decimal de Prisma (que puede
- *  venir como Decimal, number o string según el delegate). */
+/** Helper para extraer un numero de un Decimal de Prisma. */
 function toNumber(d: unknown): number {
   if (typeof d === 'number') return d;
   if (typeof d === 'string') return Number(d);
@@ -70,11 +45,16 @@ function toNumber(d: unknown): number {
   return 0;
 }
 
-/** Rango de fechas del mes actual en timezone local (cero overhead). */
+/** Rango de fechas del mes actual en timezone local. */
 function currentMonthRange(now: Date = new Date()): { from: Date; to: Date } {
   const from = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
   const to = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
   return { from, to };
+}
+
+/** Pluralización simple en español. */
+function plural(n: number, singular: string, pluralStr: string): string {
+  return n === 1 ? singular : pluralStr;
 }
 
 // ── Tipos de input compartidos ───────────────────────────────────────
@@ -84,62 +64,267 @@ export interface QueryDeps {
   logger: AnyLogger;
 }
 
-// ── 1. resumen ───────────────────────────────────────────────────────
+// ── 5 tipos de comando (reemplazan los 12 anteriores) ────────────────
 
-/** "Este mes: N compras, invertido $X, ganancia potencial $Y." */
-export async function getResumen(
-  usuarioId: string,
-  deps: QueryDeps,
-): Promise<string> {
-  try {
-    const { from, to } = currentMonthRange();
-    const compras = (await deps.prisma.compra.findMany({
-      where: { usuarioId, fecha: { gte: from, lte: to } },
-      include: { items: true },
-    })) as Array<{ id: string; items: Array<{ costoLote: unknown; gananciaTotal: unknown }> }>;
+export type QueryCommand =
+  | { type: 'estadisticas' }
+  | { type: 'productos' }
+  | { type: 'producto'; nombre: string }
+  | { type: 'compras' }
+  | { type: 'top' }
+  | { type: 'grupo'; nombre?: string };
 
-    if (compras.length === 0) return EMPTY_DB_MESSAGE;
+// ── Alias map + parse ────────────────────────────────────────────────
 
-    let invertido = 0;
-    let ganancia = 0;
-    for (const c of compras) {
-      for (const it of c.items) {
-        invertido += toNumber(it.costoLote);
-        ganancia += toNumber(it.gananciaTotal);
-      }
-    }
-    return `Este mes: ${compras.length} compras, invertido $${fmtArs(invertido)}, ganancia potencial $${fmtArs(ganancia)}.`;
-  } catch (err) {
-    deps.logger.error(
-      { event: 'query_failed', query: 'resumen', err: (err as Error).message },
-      'getResumen failed',
-    );
-    return 'Tuve un error consultando el resumen. Probá de nuevo en un ratito.';
+export function parseQueryCommand(input: string): QueryCommand | null {
+  const text = input.trim().toLowerCase();
+
+  // Aliases que resuelven a 'estadisticas'
+  if (
+    text === 'resumen' ||
+    text === 'estadisticas' ||
+    text === 'estadísticas' ||
+    text === 'ganancias' ||
+    text === 'ingresos' ||
+    text === 'ganancia realizada' ||
+    text === 'ganancia potencial' ||
+    text === 'costo promedio'
+  ) {
+    return { type: 'estadisticas' };
   }
+
+  // Aliases que resuelven a 'productos'
+  if (text === 'productos' || text === 'stock') {
+    return { type: 'productos' };
+  }
+
+  // Aliases que resuelven a 'compras'
+  if (
+    text === 'compras' ||
+    text === 'compras mes' ||
+    text === 'compras-mes' ||
+    text === 'compras del mes'
+  ) {
+    return { type: 'compras' };
+  }
+
+  // Aliases que resuelven a 'top'
+  if (text === 'top' || text === 'top ganancias') {
+    return { type: 'top' };
+  }
+
+  // producto <nombre>
+  if (text.startsWith('producto ')) {
+    const nombre = text.slice('producto '.length).trim();
+    if (nombre.length > 0) return { type: 'producto', nombre };
+  }
+
+  // grupo (bare) → list groups for selection
+  if (text === 'grupo') {
+    return { type: 'grupo' };
+  }
+
+  // grupo <nombre>
+  if (text.startsWith('grupo ')) {
+    const nombre = text.slice('grupo '.length).trim();
+    if (nombre.length > 0) return { type: 'grupo', nombre: nombre.toLowerCase() };
+  }
+
+  return null;
 }
 
-// ── 2. estadisticas ──────────────────────────────────────────────────
+// ── 1. estadisticas ──────────────────────────────────────────────────
 
-/** "Total: N compras, M items, ticket promedio $X." */
+/**
+ * Mensaje consolidado con 3 secciones:
+ * ▫️ Este mes — compras del mes, invertido, ganancia potencial
+ * ▫️ Totales — compras totales, items, ticket promedio
+ * ▫️ Ventas — ingresos, ganancia realizada, ganancia potencial restante, costo promedio
+ *
+ * Solo muestra la sección Ventas si el usuario tiene ventas registradas.
+ */
 export async function getEstadisticas(
   usuarioId: string,
   deps: QueryDeps,
 ): Promise<string> {
   try {
-    const compras = (await deps.prisma.compra.findMany({
-      where: { usuarioId },
-      include: { items: true },
-    })) as Array<{ id: string; items: Array<{ costoLote: unknown }> }>;
+    const [compras, ventas] = await Promise.all([
+      deps.prisma.compra.findMany({
+        where: { usuarioId },
+        include: { items: true },
+      }) as Promise<Array<{
+        id: string;
+        fecha: Date;
+        items: Array<{
+          nombre: string;
+          cantidadLote: number;
+          costoLote: unknown;
+          gananciaTotal: unknown;
+          precioVenta: unknown;
+          updatedAt: Date;
+        }>;
+      }>>,
+      deps.prisma.venta.findMany({
+        where: { usuarioId },
+      }) as Promise<Array<{
+        productoNombre: string;
+        cantidad: number;
+        precioVenta: unknown;
+        gananciaTotal: unknown;
+      }>>,
+    ]);
 
     if (compras.length === 0) return EMPTY_DB_MESSAGE;
 
-    const totalItems = compras.reduce((acc, c) => acc + c.items.length, 0);
-    const totalInvertido = compras.reduce(
-      (acc, c) => acc + c.items.reduce((a, it) => a + toNumber(it.costoLote), 0),
-      0,
+    const { from, to } = currentMonthRange();
+    const monthCompras = compras.filter((c) => c.fecha >= from && c.fecha <= to);
+
+    // ── Este mes ──
+    let mesInvertido = 0;
+    let mesGanancia = 0;
+    for (const c of monthCompras) {
+      for (const it of c.items) {
+        mesInvertido += toNumber(it.costoLote);
+        mesGanancia += toNumber(it.gananciaTotal);
+      }
+    }
+
+    // ── Totales ──
+    const totalCompras = compras.length;
+    let totalItems = 0;
+    let totalInvertido = 0;
+    for (const c of compras) {
+      totalItems += c.items.length;
+      for (const it of c.items) {
+        totalInvertido += toNumber(it.costoLote);
+      }
+    }
+    const ticketPromedio = totalInvertido / totalCompras;
+
+    // ── Ventas (opcional) ──
+    let ventasSection = '';
+    if (ventas.length > 0) {
+      let ingresos = 0;
+      let gananciaRealizada = 0;
+      for (const v of ventas) {
+        ingresos += v.cantidad * toNumber(v.precioVenta);
+        gananciaRealizada += toNumber(v.gananciaTotal);
+      }
+
+      // Calcular stock restante por producto (inline, desde datos ya cargados)
+      const stockMap = new Map<string, {
+        stock: number;
+        totalCost: number;
+        latestPrecioVenta: number;
+        latestUpdatedAt: Date;
+      }>();
+
+      for (const c of compras) {
+        for (const it of c.items) {
+          const current = stockMap.get(it.nombre);
+          const costLote = toNumber(it.costoLote);
+          const precioVenta = toNumber(it.precioVenta);
+          if (current === undefined) {
+            stockMap.set(it.nombre, {
+              stock: it.cantidadLote,
+              totalCost: costLote,
+              latestPrecioVenta: precioVenta,
+              latestUpdatedAt: it.updatedAt,
+            });
+          } else {
+            current.stock += it.cantidadLote;
+            current.totalCost += costLote;
+            if (it.updatedAt > current.latestUpdatedAt) {
+              current.latestPrecioVenta = precioVenta;
+              current.latestUpdatedAt = it.updatedAt;
+            }
+          }
+        }
+      }
+
+      for (const v of ventas) {
+        const current = stockMap.get(v.productoNombre);
+        if (current) {
+          current.stock -= v.cantidad;
+        }
+      }
+
+      let gananciaPotencialRestante = 0;
+      let totalRemainingStock = 0;
+      let totalRemainingCost = 0;
+
+      for (const [nombre, info] of stockMap) {
+        if (info.stock > 0) {
+          const soldQty = ventas
+            .filter((v) => v.productoNombre === nombre)
+            .reduce((sum, v) => sum + v.cantidad, 0);
+          const originalTotal = info.stock + soldQty;
+          const unitCost = originalTotal > 0 ? info.totalCost / originalTotal : 0;
+          const stockCost = unitCost * info.stock;
+
+          totalRemainingStock += info.stock;
+          totalRemainingCost += stockCost;
+          gananciaPotencialRestante += info.stock * info.latestPrecioVenta - stockCost;
+        }
+      }
+
+      const costoPromedio = totalRemainingStock > 0
+        ? totalRemainingCost / totalRemainingStock
+        : 0;
+
+      ventasSection =
+        `\n\n▫️ *Ventas*\n` +
+        `   💰 Ingresos: $${fmtArs(ingresos)}\n` +
+        `   ✅ Ganancia realizada: $${fmtArs(gananciaRealizada)}\n` +
+        `   📊 Ganancia potencial restante: $${fmtArs(gananciaPotencialRestante)}\n` +
+        `   💵 Costo promedio: $${fmtArs(costoPromedio)}`;
+    }
+
+    // ── Por grupo (opcional) ──
+    let grupoSection = '';
+    const grupos = await deps.prisma.grupoProducto.findMany() as GrupoProducto[];
+    if (grupos.length > 0) {
+      const userProductNames = new Set<string>();
+      for (const c of compras) {
+        for (const it of c.items) {
+          userProductNames.add(it.nombre);
+        }
+      }
+      const gruposConProductos = grupos.filter((g) => userProductNames.has(g.productoNombre));
+      if (gruposConProductos.length > 0) {
+        const groupCount = new Map<string, { count: number; totalInvertido: number }>();
+        for (const g of gruposConProductos) {
+          const current = groupCount.get(g.grupoNombre) ?? { count: 0, totalInvertido: 0 };
+          current.count++;
+          // Find the invest amount for this product
+          for (const c of compras) {
+            for (const it of c.items) {
+              if (it.nombre === g.productoNombre) {
+                current.totalInvertido += toNumber(it.costoLote);
+              }
+            }
+          }
+          groupCount.set(g.grupoNombre, current);
+        }
+        const groupLines = Array.from(groupCount.entries())
+          .sort((a, b) => b[1].totalInvertido - a[1].totalInvertido)
+          .map(([grupo, info]) => `   📁 ${grupo}: $${fmtArs(info.totalInvertido)} invertido · ${info.count} ${plural(info.count, 'producto', 'productos')}`);
+        grupoSection = `\n\n▫️ *Por grupo*\n${groupLines.join('\n')}`;
+      }
+    }
+
+    return (
+      `📊 *ESTADÍSTICAS*\n` +
+      `\n▫️ *Este mes*\n` +
+      `   📦 ${monthCompras.length} ${plural(monthCompras.length, 'compra', 'compras')}\n` +
+      `   💸 Invertido: $${fmtArs(mesInvertido)}\n` +
+      `   📈 Ganancia potencial: $${fmtArs(mesGanancia)}\n` +
+      `\n▫️ *Totales*\n` +
+      `   🛒 ${totalCompras} ${plural(totalCompras, 'compra', 'compras')} · ${totalItems} ${plural(totalItems, 'item', 'items')}\n` +
+      `   🎫 Ticket promedio: $${fmtArs(ticketPromedio)}` +
+      ventasSection +
+      grupoSection
     );
-    const ticketPromedio = compras.length > 0 ? totalInvertido / compras.length : 0;
-    return `Total: ${compras.length} compras, ${totalItems} items, ticket promedio $${fmtArs(ticketPromedio)}.`;
   } catch (err) {
     deps.logger.error(
       { event: 'query_failed', query: 'estadisticas', err: (err as Error).message },
@@ -149,57 +334,164 @@ export async function getEstadisticas(
   }
 }
 
-// ── 3. ganancias ─────────────────────────────────────────────────────
+// ── 2. productos ─────────────────────────────────────────────────────
 
-/** "Ganancia potencial acumulada: $X." */
-export async function getGanancias(
+export type StockPerProductInfo = {
+  stock: number;
+  latestPrecioVenta: number;
+  totalCost: number;
+};
+
+/**
+ * Mapa de producto → stock restante, precio de venta más reciente, y
+ * costo proporcional del stock restante. Usado internamente por
+ * getProductos.
+ */
+async function getStockPerProduct(
   usuarioId: string,
   deps: QueryDeps,
-): Promise<string> {
+): Promise<Map<string, StockPerProductInfo>> {
+  const result = new Map<string, StockPerProductInfo>();
+
   try {
     const compras = (await deps.prisma.compra.findMany({
       where: { usuarioId },
       include: { items: true },
-    })) as Array<{ items: Array<{ gananciaTotal: unknown }> }>;
+    })) as Array<{
+      items: Array<{
+        nombre: string;
+        cantidadLote: number;
+        costoLote: unknown;
+        precioVenta: unknown;
+        updatedAt: Date;
+      }>;
+    }>;
 
-    if (compras.length === 0) return EMPTY_DB_MESSAGE;
+    const ventas = (await deps.prisma.venta.findMany({
+      where: { usuarioId },
+    })) as Array<{ productoNombre: string; cantidad: number }>;
 
-    const total = compras.reduce(
-      (acc, c) => acc + c.items.reduce((a, it) => a + toNumber(it.gananciaTotal), 0),
-      0,
-    );
-    return `Ganancia potencial acumulada: $${fmtArs(total)}.`;
+    if (compras.length === 0) return result;
+
+    const stockMap = new Map<string, {
+      totalStock: number;
+      totalCost: number;
+      latestPrecioVenta: number;
+      latestUpdatedAt: Date;
+    }>();
+
+    for (const c of compras) {
+      for (const it of c.items) {
+        const current = stockMap.get(it.nombre);
+        const costLote = toNumber(it.costoLote);
+        const precioVenta = toNumber(it.precioVenta);
+        if (current === undefined) {
+          stockMap.set(it.nombre, {
+            totalStock: it.cantidadLote,
+            totalCost: costLote,
+            latestPrecioVenta: precioVenta,
+            latestUpdatedAt: it.updatedAt,
+          });
+        } else {
+          current.totalStock += it.cantidadLote;
+          current.totalCost += costLote;
+          if (it.updatedAt > current.latestUpdatedAt) {
+            current.latestPrecioVenta = precioVenta;
+            current.latestUpdatedAt = it.updatedAt;
+          }
+        }
+      }
+    }
+
+    for (const v of ventas) {
+      const current = stockMap.get(v.productoNombre);
+      if (current) {
+        current.totalStock -= v.cantidad;
+      }
+    }
+
+    for (const [nombre, info] of stockMap) {
+      if (info.totalStock > 0) {
+        const soldQty = ventas
+          .filter((v) => v.productoNombre === nombre)
+          .reduce((a, v) => a + v.cantidad, 0);
+        const originalTotal = info.totalStock + soldQty;
+        const unitCost = originalTotal > 0 ? info.totalCost / originalTotal : 0;
+        result.set(nombre, {
+          stock: info.totalStock,
+          latestPrecioVenta: info.latestPrecioVenta,
+          totalCost: unitCost * info.totalStock,
+        });
+      }
+    }
+
+    return result;
   } catch (err) {
     deps.logger.error(
-      { event: 'query_failed', query: 'ganancias', err: (err as Error).message },
-      'getGanancias failed',
+      { event: 'query_failed', query: 'stock-per-product', err: (err as Error).message },
+      'getStockPerProduct failed',
     );
-    return 'Tuve un error consultando ganancias. Probá de nuevo en un ratito.';
+    return result;
   }
 }
 
-// ── 4. productos ─────────────────────────────────────────────────────
-
-/** Lista de productos únicos con cantidad de cargas cada uno. */
+/**
+ * Lista de productos con stock disponible.
+ * Reemplaza los viejos getProductos + getStock.
+ */
 export async function getProductos(
   usuarioId: string,
   deps: QueryDeps,
 ): Promise<string> {
   try {
-    const items = (await deps.prisma.itemCompra.findMany({
-      where: { compra: { usuarioId } },
-      select: { nombre: true },
-    })) as Array<{ nombre: string }>;
+    const stockMap = await getStockPerProduct(usuarioId, deps);
 
-    if (items.length === 0) return EMPTY_DB_MESSAGE;
+    if (stockMap.size === 0) return EMPTY_DB_MESSAGE;
 
-    const counts = new Map<string, number>();
-    for (const it of items) {
-      counts.set(it.nombre, (counts.get(it.nombre) ?? 0) + 1);
+    // Try to group by grupoProducto
+    const grupos = await deps.prisma.grupoProducto.findMany() as GrupoProducto[];
+    if (grupos.length > 0) {
+      const grouped = new Map<string, Array<{ name: string; stock: number }>>();
+      const ungrouped: Array<{ name: string; stock: number }> = [];
+
+      for (const [name, info] of stockMap) {
+        const g = grupos.find((gp) => gp.productoNombre === name);
+        if (g) {
+          const arr = grouped.get(g.grupoNombre) ?? [];
+          arr.push({ name, stock: info.stock });
+          grouped.set(g.grupoNombre, arr);
+        } else {
+          ungrouped.push({ name, stock: info.stock });
+        }
+      }
+
+      const lines: string[] = [];
+      for (const [grupo, products] of [...grouped.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+        lines.push(`📁 *${grupo}*`);
+        for (const p of products) {
+          lines.push(`• ${p.name} — ${p.stock} en stock`);
+        }
+        lines.push('');
+      }
+      if (ungrouped.length > 0) {
+        lines.push(`📦 *SIN GRUPO*`);
+        for (const p of ungrouped.sort((a, b) => a.name.localeCompare(b.name))) {
+          lines.push(`• ${p.name} — ${p.stock} en stock`);
+        }
+        lines.push('');
+      }
+      // Remove trailing empty line
+      if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+
+      return `📦 *PRODUCTOS*\n\n${lines.join('\n')}`;
     }
-    const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
-    const lines = sorted.map(([name, count]) => `• ${name} (${count} carga${count > 1 ? 's' : ''})`);
-    return `Tus ${sorted.length} productos:\n${lines.join('\n')}`;
+
+    // No groups — flat list (backward compat)
+    const lines = Array.from(stockMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, info]) => `• ${name} — ${info.stock} en stock`);
+
+    return `📦 *PRODUCTOS*\n\n${lines.join('\n')}`;
   } catch (err) {
     deps.logger.error(
       { event: 'query_failed', query: 'productos', err: (err as Error).message },
@@ -209,48 +501,9 @@ export async function getProductos(
   }
 }
 
-// ── 5. stock ─────────────────────────────────────────────────────────
+// ── 3. producto <nombre> ─────────────────────────────────────────────
 
-/** Productos únicos con SUM(cantidadLote) agrupado por nombre. */
-export async function getStock(
-  usuarioId: string,
-  deps: QueryDeps,
-): Promise<string> {
-  try {
-    const compras = (await deps.prisma.compra.findMany({
-      where: { usuarioId },
-      include: { items: true },
-    })) as Array<{ items: Array<{ nombre: string; cantidadLote: number; unidad: string }> }>;
-
-    if (compras.length === 0) return EMPTY_DB_MESSAGE;
-
-    const stock = new Map<string, { cantidad: number; unidad: string }>();
-    for (const c of compras) {
-      for (const it of c.items) {
-        const current = stock.get(it.nombre);
-        if (current === undefined) {
-          stock.set(it.nombre, { cantidad: it.cantidadLote, unidad: it.unidad });
-        } else {
-          current.cantidad += it.cantidadLote;
-        }
-      }
-    }
-    const lines = Array.from(stock.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([name, info]) => `• ${name}: ${info.cantidad} ${info.unidad.toLowerCase()}`);
-    return `Tu stock:\n${lines.join('\n')}`;
-  } catch (err) {
-    deps.logger.error(
-      { event: 'query_failed', query: 'stock', err: (err as Error).message },
-      'getStock failed',
-    );
-    return 'Tuve un error consultando el stock. Probá de nuevo en un ratito.';
-  }
-}
-
-// ── 6. producto <nombre> ─────────────────────────────────────────────
-
-/** Detalle de un producto con fuzzy match. Si no hay match, mensaje. */
+/** Detalle de un producto con fuzzy match. Mismo comportamiento, nuevo formato visual. */
 export async function getProductoByName(
   usuarioId: string,
   query: string,
@@ -260,10 +513,6 @@ export async function getProductoByName(
     const q = query.trim().toLowerCase();
     if (q.length === 0) return 'Decime el nombre del producto. Ej: "producto medias negras".';
 
-    // Búsqueda exacta (lowercase match) primero — es más rápida y
-    // más precisa. Si no hay match exacto, fuzzy con `pg_trgm` via
-    // `$queryRaw` (el delegate `itemCompra` no expone similarity() en
-    // el cliente generado sin raw SQL).
     const exact = (await deps.prisma.itemCompra.findMany({
       where: { compra: { usuarioId }, nombre: { equals: q } },
       orderBy: { updatedAt: 'desc' },
@@ -274,11 +523,6 @@ export async function getProductoByName(
       return formatProductoDetalle(exact[0]!);
     }
 
-    // Fuzzy fallback: similarity > 0.4 con `pg_trgm`.
-    // Usamos $queryRawUnsafe porque el cliente generado no tipa
-    // la extension pg_trgm directamente. El nombre va como param
-    // (no concatenado) — defense in depth contra SQL injection
-    // aunque ya filtraremos por usuario en el resultado.
     const fuzzy = (await deps.prisma.$queryRaw`
       SELECT i.*
       FROM "ItemCompra" i
@@ -308,12 +552,18 @@ function formatProductoDetalle(item: ItemCompra): string {
   const costoU = fmtArs(item.costoUnitario);
   const venta = fmtArs(item.precioVenta);
   const gananciaU = fmtArs(item.gananciaUnitaria);
-  return `${item.nombre}: ${cant} ${unidad}, costo $${costoU} c/u, vendés a $${venta}, ganancia $${gananciaU} c/u.`;
+  return (
+    `🔍 *${item.nombre}*\n` +
+    `   Stock: ${cant} ${unidad}\n` +
+    `   Costo: $${costoU} c/u\n` +
+    `   Venta: $${venta} c/u\n` +
+    `   Ganancia: $${gananciaU} c/u`
+  );
 }
 
-// ── 7. compras mes ───────────────────────────────────────────────────
+// ── 4. compras ───────────────────────────────────────────────────────
 
-/** Listado de compras del mes con fecha, proveedor, total. */
+/** Listado de compras del mes con formato visual. */
 export async function getComprasMes(
   usuarioId: string,
   deps: QueryDeps,
@@ -333,19 +583,19 @@ export async function getComprasMes(
       const total = c.items.reduce((a, it) => a + toNumber(it.costoLote), 0);
       return `• ${fecha} — $${fmtArs(total)}`;
     });
-    return `Compras de este mes (${compras.length}):\n${lines.join('\n')}`;
+    return `🛒 *COMPRAS DEL MES* (${compras.length})\n\n${lines.join('\n')}`;
   } catch (err) {
     deps.logger.error(
-      { event: 'query_failed', query: 'compras-mes', err: (err as Error).message },
+      { event: 'query_failed', query: 'compras', err: (err as Error).message },
       'getComprasMes failed',
     );
     return 'Tuve un error listando las compras del mes. Probá de nuevo en un ratito.';
   }
 }
 
-// ── 8. top ganancias ─────────────────────────────────────────────────
+// ── 5. top ───────────────────────────────────────────────────────────
 
-/** Top N items por gananciaUnitaria (cross-usuario). */
+/** Top N productos por gananciaUnitaria (cross-usuario). */
 export async function getTopGanancias(
   limit: number,
   deps: QueryDeps,
@@ -362,266 +612,106 @@ export async function getTopGanancias(
     const lines = items.map(
       (it, i) => `${i + 1}. ${it.nombre} — $${fmtArs(it.gananciaUnitaria)} c/u`,
     );
-    return `Top ${items.length} ganancias unitarias:\n${lines.join('\n')}`;
+    return `🏆 *TOP GANANCIAS*\n\n${lines.join('\n')}`;
   } catch (err) {
     deps.logger.error(
-      { event: 'query_failed', query: 'top-ganancias', err: (err as Error).message },
+      { event: 'query_failed', query: 'top', err: (err as Error).message },
       'getTopGanancias failed',
     );
     return 'Tuve un error buscando el top. Probá de nuevo en un ratito.';
   }
 }
 
-// ── 9. ingresos ──────────────────────────────────────────────────────
-
-/** "Ingresos generados: $X." — suma de cantidad × precioVenta de Ventas. */
-export async function getIngresos(
-  usuarioId: string,
-  deps: QueryDeps,
-): Promise<string> {
-  try {
-    const ventas = (await deps.prisma.venta.findMany({
-      where: { usuarioId },
-    })) as Array<{ cantidad: number; precioVenta: unknown }>;
-
-    if (ventas.length === 0) return 'Todavía no registaste ventas. Usá /vender para empezar.';
-
-    const total = ventas.reduce(
-      (acc, v) => acc + v.cantidad * toNumber(v.precioVenta),
-      0,
-    );
-    return `Ingresos generados: $${fmtArs(total)}.`;
-  } catch (err) {
-    deps.logger.error(
-      { event: 'query_failed', query: 'ingresos', err: (err as Error).message },
-      'getIngresos failed',
-    );
-    return 'Tuve un error consultando ingresos. Probá de nuevo en un ratito.';
-  }
-}
-
-// ── 10. ganancia realizada ───────────────────────────────────────────
-
-/** "Ganancia realizada: $X." — suma de gananciaTotal de Ventas. */
-export async function getGananciaRealizada(
-  usuarioId: string,
-  deps: QueryDeps,
-): Promise<string> {
-  try {
-    const ventas = (await deps.prisma.venta.findMany({
-      where: { usuarioId },
-    })) as Array<{ gananciaTotal: unknown }>;
-
-    if (ventas.length === 0) return 'Todavía no registaste ventas. Usá /vender para empezar.';
-
-    const total = ventas.reduce(
-      (acc, v) => acc + toNumber(v.gananciaTotal),
-      0,
-    );
-    return `Ganancia realizada: $${fmtArs(total)}.`;
-  } catch (err) {
-    deps.logger.error(
-      { event: 'query_failed', query: 'ganancia-realizada', err: (err as Error).message },
-      'getGananciaRealizada failed',
-    );
-    return 'Tuve un error consultando ganancia realizada. Probá de nuevo en un ratito.';
-  }
-}
-
-// ── 11. stock per product (helper) ───────────────────────────────────
-
-export type StockPerProductInfo = {
-  stock: number;
-  latestPrecioVenta: number;
-  totalCost: number;
-};
+// ── 6. grupo <nombre> ────────────────────────────────────────────────
 
 /**
- * Mapa de producto → stock restante, precio de venta más reciente, y
- * costo proporcional del stock restante. Usado por ganancia potencial
- * y costo promedio.
+ * Stats for a single group: list products, calculate total stock/investment.
  */
-export async function getStockPerProduct(
+export async function getGrupoStats(
   usuarioId: string,
+  nombre: string,
   deps: QueryDeps,
-): Promise<Map<string, StockPerProductInfo>> {
-  const result = new Map<string, StockPerProductInfo>();
-
+): Promise<string> {
   try {
+    const grupos = await deps.prisma.grupoProducto.findMany({
+      where: { grupoNombre: { equals: nombre } },
+    }) as GrupoProducto[];
+
+    if (grupos.length === 0) {
+      return `No encontré el grupo "${nombre}".`;
+    }
+
+    const stockMap = await getStockPerProduct(usuarioId, deps);
+    const groupProducts = grupos.filter((g) => stockMap.has(g.productoNombre));
+
+    if (groupProducts.length === 0) {
+      return `El grupo "${nombre}" existe pero no tenés productos de ese grupo.`;
+    }
+
+    // Calculate original total purchased per product
     const compras = (await deps.prisma.compra.findMany({
       where: { usuarioId },
-      include: { items: true },
-    })) as Array<{ items: Array<{ nombre: string; cantidadLote: number; costoLote: unknown; precioVenta: unknown; updatedAt: Date }> }>;
+      select: { items: { select: { nombre: true, cantidadLote: true } } },
+    })) as Array<{ items: Array<{ nombre: string; cantidadLote: number }> }>;
 
     const ventas = (await deps.prisma.venta.findMany({
       where: { usuarioId },
+      select: { productoNombre: true, cantidad: true },
     })) as Array<{ productoNombre: string; cantidad: number }>;
 
-    if (compras.length === 0) return result;
-
-    // Build stock per product from ItemCompra
-    const stockMap = new Map<string, { totalStock: number; totalCost: number; latestPrecioVenta: number; latestUpdatedAt: Date }>();
-
+    const originalMap = new Map<string, number>();
     for (const c of compras) {
       for (const it of c.items) {
-        const current = stockMap.get(it.nombre);
-        const costLote = toNumber(it.costoLote);
-        const precioVenta = toNumber(it.precioVenta);
-        if (current === undefined) {
-          stockMap.set(it.nombre, {
-            totalStock: it.cantidadLote,
-            totalCost: costLote,
-            latestPrecioVenta: precioVenta,
-            latestUpdatedAt: it.updatedAt,
-          });
-        } else {
-          current.totalStock += it.cantidadLote;
-          current.totalCost += costLote;
-          // Keep the most recent precioVenta
-          if (it.updatedAt > current.latestUpdatedAt) {
-            current.latestPrecioVenta = precioVenta;
-            current.latestUpdatedAt = it.updatedAt;
-          }
-        }
+        originalMap.set(it.nombre, (originalMap.get(it.nombre) ?? 0) + it.cantidadLote);
       }
     }
-
-    // Subtract sold quantities
     for (const v of ventas) {
-      const current = stockMap.get(v.productoNombre);
-      if (current) {
-        current.totalStock -= v.cantidad;
+      const prev = originalMap.get(v.productoNombre);
+      if (prev !== undefined) {
+        // original stays as purchased; remaining = original - sold
       }
     }
 
-    // Build result, excluding products with zero or negative stock
-    for (const [nombre, info] of stockMap) {
-      if (info.totalStock > 0) {
-        const unitCost = info.totalCost / (info.totalStock + ventas.filter(v => v.productoNombre === nombre).reduce((a, v) => a + v.cantidad, 0));
-        result.set(nombre, {
-          stock: info.totalStock,
-          latestPrecioVenta: info.latestPrecioVenta,
-          totalCost: unitCost * info.totalStock,
-        });
-      }
+    const lines: string[] = [];
+    let totalInvertido = 0;
+    let totalStock = 0;
+    let totalOriginal = 0;
+    let gananciaPotencial = 0;
+
+    for (const g of groupProducts) {
+      const info = stockMap.get(g.productoNombre)!;
+      const original = originalMap.get(g.productoNombre) ?? info.stock;
+      totalInvertido += info.totalCost;
+      totalStock += info.stock;
+      totalOriginal += original;
+      const ventaPotential = info.stock * info.latestPrecioVenta;
+      gananciaPotencial += ventaPotential - info.totalCost;
+      lines.push(
+        `• ${g.productoNombre} — ${info.stock}/${original} u. · $${fmtArs(info.totalCost)}`,
+      );
     }
 
-    return result;
+    const gananciaActual = gananciaPotencial;
+
+    return (
+      `📁 *GRUPO: ${nombre}*\n` +
+      `   📦 ${groupProducts.length} producto${groupProducts.length !== 1 ? 's' : ''} · ${totalStock}/${totalOriginal} unidades\n\n` +
+      lines.join('\n') +
+      `\n\n📊 *Resumen*\n` +
+      `   💸 Invertido: $${fmtArs(totalInvertido)}\n` +
+      `   📈 Ganancia potencial: $${fmtArs(gananciaPotencial)}\n` +
+      `   ✅ Ganancia actual: $${fmtArs(gananciaActual)}`
+    );
   } catch (err) {
     deps.logger.error(
-      { event: 'query_failed', query: 'stock-per-product', err: (err as Error).message },
-      'getStockPerProduct failed',
+      { event: 'query_failed', query: 'grupo', err: (err as Error).message },
+      'getGrupoStats failed',
     );
-    return result;
+    return 'Tuve un error consultando el grupo. Probá de nuevo en un ratito.';
   }
 }
 
-// ── 12. ganancia potencial ───────────────────────────────────────────
-
-/** "Ganancia potencial: $X." — ganancia de stock restante a precio de lista. */
-export async function getGananciaPotencial(
-  usuarioId: string,
-  deps: QueryDeps,
-): Promise<string> {
-  try {
-    const stockMap = await getStockPerProduct(usuarioId, deps);
-
-    if (stockMap.size === 0) {
-      // Check if there are any compras at all
-      const compras = (await deps.prisma.compra.findMany({
-        where: { usuarioId },
-      })) as Array<unknown>;
-      if (compras.length === 0) return 'Todavía no cargaste compras. Usá /nueva para empezar.';
-    }
-
-    let total = 0;
-    for (const [, info] of stockMap) {
-      total += info.stock * info.latestPrecioVenta - info.totalCost;
-    }
-    return `Ganancia potencial: $${fmtArs(total)}.`;
-  } catch (err) {
-    deps.logger.error(
-      { event: 'query_failed', query: 'ganancia-potencial', err: (err as Error).message },
-      'getGananciaPotencial failed',
-    );
-    return 'Tuve un error consultando ganancia potencial. Probá de nuevo en un ratito.';
-  }
-}
-
-// ── 13. costo promedio ───────────────────────────────────────────────
-
-/** "Costo promedio: $X." — costo promedio ponderado del stock restante. */
-export async function getCostoPromedio(
-  usuarioId: string,
-  deps: QueryDeps,
-): Promise<string> {
-  try {
-    const stockMap = await getStockPerProduct(usuarioId, deps);
-
-    if (stockMap.size === 0) {
-      const compras = (await deps.prisma.compra.findMany({
-        where: { usuarioId },
-      })) as Array<unknown>;
-      if (compras.length === 0) return 'Todavía no cargaste compras. Usá /nueva para empezar.';
-    }
-
-    let totalRemainingStock = 0;
-    let totalRemainingCost = 0;
-    for (const [, info] of stockMap) {
-      totalRemainingStock += info.stock;
-      totalRemainingCost += info.totalCost;
-    }
-
-    if (totalRemainingStock === 0) return 'Costo promedio: $0.';
-    const costoPromedio = totalRemainingCost / totalRemainingStock;
-    return `Costo promedio: $${fmtArs(costoPromedio)}.`;
-  } catch (err) {
-    deps.logger.error(
-      { event: 'query_failed', query: 'costo-promedio', err: (err as Error).message },
-      'getCostoPromedio failed',
-    );
-    return 'Tuve un error consultando costo promedio. Probá de nuevo en un ratito.';
-  }
-}
-
-// ── Command dispatcher (single entrypoint para el wire-up) ───────────
-
-/** Mapea un comando de texto a su use case. Retorna null si no matchea. */
-export type QueryCommand =
-  | { type: 'resumen' }
-  | { type: 'estadisticas' }
-  | { type: 'ganancias' }
-  | { type: 'productos' }
-  | { type: 'stock' }
-  | { type: 'producto'; nombre: string }
-  | { type: 'compras-mes' }
-  | { type: 'top-ganancias' }
-  | { type: 'ingresos' }
-  | { type: 'ganancia-realizada' }
-  | { type: 'ganancia-potencial' }
-  | { type: 'costo-promedio' };
-
-export function parseQueryCommand(input: string): QueryCommand | null {
-  const text = input.trim().toLowerCase();
-  if (text === 'resumen') return { type: 'resumen' };
-  if (text === 'estadisticas' || text === 'estadísticas') return { type: 'estadisticas' };
-  if (text === 'ganancias') return { type: 'ganancias' };
-  if (text === 'productos') return { type: 'productos' };
-  if (text === 'stock') return { type: 'stock' };
-  if (text === 'compras mes' || text === 'compras-mes' || text === 'compras del mes') {
-    return { type: 'compras-mes' };
-  }
-  if (text === 'top ganancias' || text === 'top') return { type: 'top-ganancias' };
-  if (text === 'ingresos') return { type: 'ingresos' };
-  if (text === 'ganancia realizada') return { type: 'ganancia-realizada' };
-  if (text === 'ganancia potencial') return { type: 'ganancia-potencial' };
-  if (text === 'costo promedio') return { type: 'costo-promedio' };
-  if (text.startsWith('producto ')) {
-    const nombre = text.slice('producto '.length).trim();
-    if (nombre.length > 0) return { type: 'producto', nombre };
-  }
-  return null;
-}
+// ── Command dispatcher ───────────────────────────────────────────────
 
 /** Ejecuta un query command y devuelve el string formateado. */
 export async function executeQuery(
@@ -630,56 +720,43 @@ export async function executeQuery(
   deps: QueryDeps,
 ): Promise<string> {
   switch (cmd.type) {
-    case 'resumen':
-      return getResumen(usuarioId, deps);
     case 'estadisticas':
       return getEstadisticas(usuarioId, deps);
-    case 'ganancias':
-      return getGanancias(usuarioId, deps);
     case 'productos':
       return getProductos(usuarioId, deps);
-    case 'stock':
-      return getStock(usuarioId, deps);
     case 'producto':
       return getProductoByName(usuarioId, cmd.nombre, deps);
-    case 'compras-mes':
+    case 'compras':
       return getComprasMes(usuarioId, deps);
-    case 'top-ganancias':
+    case 'top':
       return getTopGanancias(5, deps);
-    case 'ingresos':
-      return getIngresos(usuarioId, deps);
-    case 'ganancia-realizada':
-      return getGananciaRealizada(usuarioId, deps);
-    case 'ganancia-potencial':
-      return getGananciaPotencial(usuarioId, deps);
-    case 'costo-promedio':
-      return getCostoPromedio(usuarioId, deps);
+    case 'grupo':
+      return getGrupoStats(usuarioId, cmd.nombre, deps);
   }
 }
 
-/** Texto completo para /ayuda — lista todos los comandos disponibles. */
+// ── Helpers exportados / constantes ──────────────────────────────────
+
+/** Texto completo para /ayuda — lista solo los 5 comandos de consulta. */
 export const HELP_TEXT = `Comandos disponibles:
 
-/nueva — Cargar una compra nueva. Te voy a hacer paso a paso las preguntas.
-/agregar — Agregar stock a un producto que ya cargaste.
-/vender — Vender un producto que ya cargaste.
-/editar — Editar un producto existente (nombre, cantidad, unidad, costo o precio).
-/eliminar — Eliminar todos los productos cargados.
+/nueva — Cargar una compra nueva.
+/agregar — Agregar stock a un producto.
+/vender — Vender un producto.
+/editar — Editar un producto.
+/eliminar — Eliminar productos.
+/grupo <producto> — Asignar un producto a un grupo.
+/exportar — Descargar Excel con todos los datos.
+/importar — Importar datos desde un archivo Excel.
 /ayuda — Mostrar esta ayuda.
 
 Consultas:
-• resumen — Resumen del mes actual.
-• estadisticas — Totales históricos.
-• ganancias — Ganancia potencial acumulada.
-• productos — Lista de productos cargados.
-• stock — Productos con stock total.
+• estadisticas — Todas las estadísticas en un solo lugar.
+• productos — Lista de productos con stock (agrupados por grupo).
 • producto <nombre> — Detalle de un producto.
-• compras mes — Listado de compras del mes.
-• top ganancias — Top productos por ganancia.
-• ingresos — Total de ingresos por ventas.
-• ganancia realizada — Ganancia total de ventas concretadas.
-• ganancia potencial — Ganancia estimada del stock restante.
-• costo promedio — Costo promedio del stock actual.
+• compras — Compras de este mes.
+• top — Top productos por ganancia.
+• grupo — Estadísticas de un grupo de productos (seleccioná de la lista).
 
 En cualquier momento:
 • cancelar — Cancelar el flujo actual.
@@ -687,8 +764,8 @@ En cualquier momento:
 
 /** Mensaje de ayuda cuando el usuario tipea un comando desconocido. */
 export const UNKNOWN_COMMAND_MESSAGE =
-  'No entendí. Comandos: /nueva, /agregar, /editar, /eliminar, /ayuda, resumen, estadisticas, ganancias, productos, ' +
-  'stock, producto <nombre>, compras mes, top ganancias, ingresos, ganancia realizada, ganancia potencial, costo promedio.';
+  'No entendí. Comandos: /nueva, /agregar, /editar, /eliminar, /grupo <producto>, /exportar, /importar, /ayuda, ' +
+  'estadisticas, productos, producto <nombre>, compras, top, grupo.';
 
 /** Log cuando un comando desconocido llega (OWASP A09). */
 export function logUnknownCommand(logger: AnyLogger, raw: string): void {
