@@ -349,9 +349,45 @@ describe('ExportService', () => {
     });
   });
 
+  // ── hasData ────────────────────────────────────────────────────────
+
+  describe('hasData', () => {
+    it('returns true when there are compras', async () => {
+      const result = await service.hasData('user-1');
+      expect(result).toBe(true);
+    });
+
+    it('returns true when there are only ventas (no compras)', async () => {
+      const onlyVentas = buildMockPrisma({ compras: [], ventas: TWO_VENTAS });
+      const svc = new ExportService(onlyVentas, silentLogger(), mockPort);
+      const result = await svc.hasData('user-1');
+      expect(result).toBe(true);
+    });
+
+    it('returns false when there are no compras and no ventas', async () => {
+      const empty = buildMockPrisma({ compras: [], ventas: [] });
+      const svc = new ExportService(empty, silentLogger(), mockPort);
+      const result = await svc.hasData('user-1');
+      expect(result).toBe(false);
+    });
+  });
+
   // ── exportAndSend ─────────────────────────────────────────────────
 
   describe('exportAndSend', () => {
+    it('sends text message when there is no data', async () => {
+      const emptyPrisma = buildMockPrisma({ compras: [], ventas: [] });
+      const emptySvc = new ExportService(emptyPrisma, silentLogger(), mockPort);
+
+      await emptySvc.exportAndSend('user-1', 'chat-1@c.us');
+
+      expect(mockPort.sendDocument).not.toHaveBeenCalled();
+      expect(mockPort.sendText).toHaveBeenCalledWith(
+        'chat-1@c.us',
+        ExportService.NO_DATA_MESSAGE,
+      );
+    });
+
     it('sends document via port and cleans up temp file', async () => {
       const filePath = await service.exportToFile('user-1');
       // Mock exportToFile to return a known path so we can check cleanup
@@ -362,7 +398,7 @@ describe('ExportService', () => {
       expect(mockPort.sendDocument).toHaveBeenCalledWith(
         'chat-1@c.us',
         filePath,
-        expect.objectContaining({ filename: 'datos.xlsx' }),
+        expect.objectContaining({ filename: expect.stringMatching(/^exportacion_\d{4}-\d{2}-\d{2}\.xlsx$/) }),
       );
 
       // File should be cleaned up

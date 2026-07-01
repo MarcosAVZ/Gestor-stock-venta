@@ -82,6 +82,17 @@ export class ExportService {
     private readonly port?: WhatsAppMessagingPort,
   ) {}
 
+  /** Mensaje cuando no hay datos para exportar. */
+  static readonly NO_DATA_MESSAGE = 'No hay datos para exportar. Primero cargá algunas compras con /nueva.';
+
+  /**
+   * Verifica si el usuario tiene datos para exportar.
+   */
+  async hasData(usuarioId: string): Promise<boolean> {
+    const [compras, ventas] = await this.queryData(usuarioId);
+    return compras.length > 0 || ventas.length > 0;
+  }
+
   /**
    * Construye el workbook, lo escribe a un archivo temporal y devuelve el path.
    * El caller es responsable de limpiar el archivo.
@@ -116,16 +127,28 @@ export class ExportService {
 
   /**
    * Construye el Excel, lo envía vía WhatsApp y limpia el archivo temporal.
+   * Si no hay datos, envía un mensaje de texto informativo en vez del Excel.
    */
   async exportAndSend(usuarioId: string, chatId: string): Promise<void> {
     if (!this.port) {
       throw new Error('ExportService: WhatsAppMessagingPort no está configurado');
     }
 
+    const tieneDatos = await this.hasData(usuarioId);
+    if (!tieneDatos) {
+      await this.port.sendText(chatId, ExportService.NO_DATA_MESSAGE);
+      this.logger.info(
+        { event: 'export_no_data', usuarioId, chatId },
+        'ExportService: no data to export, sent info message',
+      );
+      return;
+    }
+
     const filePath = await this.exportToFile(usuarioId);
     try {
+      const today = new Date().toISOString().slice(0, 10);
       await this.port.sendDocument(chatId, filePath, {
-        filename: 'datos.xlsx',
+        filename: `exportacion_${today}.xlsx`,
         caption: '📊 Todos los datos',
       });
       this.logger.info(
