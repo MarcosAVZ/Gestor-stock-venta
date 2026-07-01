@@ -24,10 +24,8 @@ import {
 } from '../../src/interface/whatsapp/conversationStateMachine.ts';
 import { InvariantViolationError } from '../../src/domain/errors/ProgrammerError.ts';
 
-/** Estados que la state machine conoce actualmente (sin estados de import). */
-const ALL_STATES = Object.values(ConversationState).filter(
-  (s) => s !== ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO && s !== ConversationState.IMPORTANDO_REVISANDO,
-);
+/** Estados que la state machine conoce actualmente (todos). */
+const ALL_STATES = Object.values(ConversationState);
 
 describe('conversationStateMachine', () => {
   describe('valid transitions (happy path table)', () => {
@@ -359,6 +357,125 @@ describe('conversationStateMachine', () => {
     });
   });
 
+  describe('IMPORTANDO_ESPERANDO_ARCHIVO state', () => {
+    it('PREGUNTANDO_PRODUCTO + IMPORTAR_INICIAR → IMPORTANDO_ESPERANDO_ARCHIVO', () => {
+      const r = transition(ConversationState.PREGUNTANDO_PRODUCTO, { type: 'IMPORTAR_INICIAR' });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO,
+        accion: { tipo: 'PEDIR_ARCHIVO' },
+      });
+    });
+
+    it('IMPORTANDO_ESPERANDO_ARCHIVO + DOCUMENTO_RECIBIDO → IMPORTANDO_REVISANDO', () => {
+      const r = transition(ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO, { type: 'DOCUMENTO_RECIBIDO' });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.IMPORTANDO_REVISANDO,
+        accion: { tipo: 'MOSTRAR_DIFF' },
+      });
+    });
+
+    it('IMPORTANDO_ESPERANDO_ARCHIVO + CANCELAR → PREGUNTANDO_PRODUCTO', () => {
+      const r = transition(ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO, { type: 'CANCELAR' });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.PREGUNTANDO_PRODUCTO,
+        accion: { tipo: 'RESET', mensaje: 'Listo, cancelé. Empecemos de nuevo.' },
+      });
+    });
+
+    it('IMPORTANDO_ESPERANDO_ARCHIVO + MENU → PREGUNTANDO_PRODUCTO', () => {
+      const r = transition(ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO, { type: 'MENU' });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.PREGUNTANDO_PRODUCTO,
+        accion: { tipo: 'RESET', mensaje: 'Empecemos de nuevo. Decime: nueva, agregar, ayuda, etc.' },
+      });
+    });
+
+    it('IMPORTANDO_ESPERANDO_ARCHIVO + TIMEOUT → PREGUNTANDO_PRODUCTO', () => {
+      const r = transition(ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO, { type: 'TIMEOUT' });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.PREGUNTANDO_PRODUCTO,
+        accion: { tipo: 'RESET', mensaje: 'Tu sesión se cerró por inactividad. Mandame un mensaje nuevo.' },
+      });
+    });
+
+    it('IMPORTANDO_ESPERANDO_ARCHIVO + PRODUCTO_RECIBIDO → ok: false', () => {
+      const r = transition(ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO, {
+        type: 'PRODUCTO_RECIBIDO',
+        valor: 'test',
+      });
+      expect(r.ok).toBe(false);
+    });
+  });
+
+  describe('IMPORTANDO_REVISANDO state', () => {
+    it('IMPORTANDO_REVISANDO + CONFIRMAR_IMPORT → PREGUNTANDO_PRODUCTO / APLICAR_IMPORT', () => {
+      const r = transition(ConversationState.IMPORTANDO_REVISANDO, { type: 'CONFIRMAR_IMPORT' });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.PREGUNTANDO_PRODUCTO,
+        accion: { tipo: 'APLICAR_IMPORT' },
+      });
+    });
+
+    it('IMPORTANDO_REVISANDO + CANCELAR_IMPORT → PREGUNTANDO_PRODUCTO / RESET', () => {
+      const r = transition(ConversationState.IMPORTANDO_REVISANDO, { type: 'CANCELAR_IMPORT' });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.PREGUNTANDO_PRODUCTO,
+        accion: { tipo: 'RESET', mensaje: 'Ok, importación cancelada.' },
+      });
+    });
+
+    it('IMPORTANDO_REVISANDO + DOCUMENTO_RECIBIDO → IMPORTANDO_REVISANDO / MOSTRAR_DIFF (re-file)', () => {
+      const r = transition(ConversationState.IMPORTANDO_REVISANDO, { type: 'DOCUMENTO_RECIBIDO' });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.IMPORTANDO_REVISANDO,
+        accion: { tipo: 'MOSTRAR_DIFF' },
+      });
+    });
+
+    it('IMPORTANDO_REVISANDO + CANCELAR → PREGUNTANDO_PRODUCTO', () => {
+      const r = transition(ConversationState.IMPORTANDO_REVISANDO, { type: 'CANCELAR' });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.PREGUNTANDO_PRODUCTO,
+        accion: { tipo: 'RESET', mensaje: 'Listo, cancelé. Empecemos de nuevo.' },
+      });
+    });
+
+    it('IMPORTANDO_REVISANDO + MENU → PREGUNTANDO_PRODUCTO', () => {
+      const r = transition(ConversationState.IMPORTANDO_REVISANDO, { type: 'MENU' });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.PREGUNTANDO_PRODUCTO,
+        accion: { tipo: 'RESET', mensaje: 'Empecemos de nuevo. Decime: nueva, agregar, ayuda, etc.' },
+      });
+    });
+
+    it('IMPORTANDO_REVISANDO + TIMEOUT → PREGUNTANDO_PRODUCTO', () => {
+      const r = transition(ConversationState.IMPORTANDO_REVISANDO, { type: 'TIMEOUT' });
+      expect(r).toEqual({
+        ok: true,
+        siguiente: ConversationState.PREGUNTANDO_PRODUCTO,
+        accion: { tipo: 'RESET', mensaje: 'Tu sesión se cerró por inactividad. Mandame un mensaje nuevo.' },
+      });
+    });
+
+    it('IMPORTANDO_REVISANDO + PRODUCTO_RECIBIDO → ok: false', () => {
+      const r = transition(ConversationState.IMPORTANDO_REVISANDO, {
+        type: 'PRODUCTO_RECIBIDO',
+        valor: 'test',
+      });
+      expect(r.ok).toBe(false);
+    });
+  });
+
   describe('all state-event combinations are covered', () => {
     it('no (state, event) combo panics unexpectedly', () => {
       const events: ConversationEvent[] = [
@@ -376,6 +493,10 @@ describe('conversationStateMachine', () => {
         { type: 'COSTO_LOTE_AGREGAR_RECIBIDO', valor: 1000 },
         { type: 'CANTIDAD_AGREGAR_RECIBIDA', valor: 1 },
         { type: 'NOMBRE_GRUPO_RECIBIDO', valor: 'lácteos' },
+        { type: 'IMPORTAR_INICIAR' },
+        { type: 'DOCUMENTO_RECIBIDO' },
+        { type: 'CONFIRMAR_IMPORT' },
+        { type: 'CANCELAR_IMPORT' },
         { type: 'CANCELAR' },
         { type: 'MENU' },
         { type: 'TIMEOUT' },

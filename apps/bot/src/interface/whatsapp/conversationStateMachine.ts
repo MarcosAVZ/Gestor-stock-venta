@@ -58,7 +58,11 @@ export type ConversationEvent =
   | { type: 'CANTIDAD_AGREGAR_RECIBIDA'; valor: number }
   | { type: 'CANCELAR' }
   | { type: 'MENU' }
-  | { type: 'TIMEOUT' };
+  | { type: 'TIMEOUT' }
+  | { type: 'IMPORTAR_INICIAR' }
+  | { type: 'DOCUMENTO_RECIBIDO' }
+  | { type: 'CONFIRMAR_IMPORT' }
+  | { type: 'CANCELAR_IMPORT' };
 
 // ── Acciones ────────────────────────────────────────────────────────
 
@@ -80,7 +84,10 @@ export type Accion =
   | { tipo: 'PEDIR_CANTIDAD_VENTA' }
   | { tipo: 'PEDIR_COSTO_LOTE_AGREGAR' }
   | { tipo: 'MOSTRAR_RESUMEN_VENTA'; resumen: string }
-  | { tipo: 'GUARDAR_VENTA' };
+  | { tipo: 'GUARDAR_VENTA' }
+  | { tipo: 'PEDIR_ARCHIVO' }
+  | { tipo: 'MOSTRAR_DIFF' }
+  | { tipo: 'APLICAR_IMPORT' };
 
 // ── Result ──────────────────────────────────────────────────────────
 
@@ -154,6 +161,9 @@ export function transition(
     case ConversationState.PREGUNTANDO_PRODUCTO:
       if (event.type === 'PRODUCTO_RECIBIDO') {
         return ok(ConversationState.PREGUNTANDO_CANTIDAD, { tipo: 'PEDIR_CANTIDAD' });
+      }
+      if (event.type === 'IMPORTAR_INICIAR') {
+        return ok(ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO, { tipo: 'PEDIR_ARCHIVO' });
       }
       return invalid(current, event);
 
@@ -316,6 +326,27 @@ export function transition(
         return ok(ConversationState.VENDIENDO_CANTIDAD, { tipo: 'PEDIR_CANTIDAD_VENTA' });
       }
       return invalid(current, event);
+
+    case ConversationState.IMPORTANDO_ESPERANDO_ARCHIVO:
+      if (event.type === 'DOCUMENTO_RECIBIDO') {
+        return ok(ConversationState.IMPORTANDO_REVISANDO, { tipo: 'MOSTRAR_DIFF' });
+      }
+      return invalid(current, event, 'un archivo Excel');
+
+    case ConversationState.IMPORTANDO_REVISANDO:
+      if (event.type === 'CONFIRMAR_IMPORT') {
+        return ok(ConversationState.PREGUNTANDO_PRODUCTO, { tipo: 'APLICAR_IMPORT' });
+      }
+      if (event.type === 'CANCELAR_IMPORT') {
+        return ok(ConversationState.PREGUNTANDO_PRODUCTO, {
+          tipo: 'RESET',
+          mensaje: 'Ok, importación cancelada.',
+        });
+      }
+      if (event.type === 'DOCUMENTO_RECIBIDO') {
+        return ok(ConversationState.IMPORTANDO_REVISANDO, { tipo: 'MOSTRAR_DIFF' });
+      }
+      return invalid(current, event, 'sí o no');
 
     default: {
       // Exhaustiveness check: si Prisma agrega un estado nuevo al enum
