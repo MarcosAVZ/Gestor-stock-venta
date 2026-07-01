@@ -84,6 +84,7 @@ export type PrismaClientLike = {
   $queryRaw: ((strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>) & ((
     sql: { strings: string[]; values: unknown[] },
   ) => Promise<unknown>);
+  $transaction: <T>(fn: (tx: PrismaClientLike) => Promise<T>) => Promise<T>;
 };
 
 /** Row que `createMany` espera para cada ItemCompra. */
