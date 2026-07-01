@@ -47,6 +47,7 @@ import { handleSlashCommand } from '../handlers/slashHandlers.ts';
 import { inputToEvent } from '../handlers/inputMapper.ts';
 import { renderAccion, applyAccionToDatos } from '../handlers/actionRenderer.ts';
 import { handleSpecialCase } from '../handlers/stateHandlers.ts';
+import { handleConfirmarImport } from '../handlers/importHandlers.ts';
 import type { ExportService } from '../excel/ExportService.ts';
 import type { ImportService } from '../excel/ImportService.ts';
 import type { HandlerContext } from '../handlers/HandlerContext.ts';
@@ -166,6 +167,7 @@ export async function handleIncomingMessage(
       ventaRepo: deps.ventaRepo,
       prisma: queryDeps.prisma, logger,
       exportService: deps.exportService,
+      importService: deps.importService,
       chatId: `${input.phone}@c.us`,
     };
     const slashResult = await handleSlashCommand(slashCmd, ctx);
@@ -201,6 +203,7 @@ export async function handleIncomingMessage(
     ventaRepo: deps.ventaRepo,
     prisma: queryDeps.prisma, logger,
     exportService: deps.exportService,
+    importService: deps.importService,
     chatId: `${input.phone}@c.us`,
   };
   const specialResult = await handleSpecialCase({ workingState, event, workingDatos, ctx });
@@ -242,6 +245,30 @@ export async function handleIncomingMessage(
       return {
         responses: ['Ufa, no pude guardar la compra. ¿Probamos de nuevo? Decí "sí" o "cancelar".'],
         newState: workingState, rejected: true,
+      };
+    }
+  }
+
+  // ── Persist APLICAR_IMPORT action ───────────────────────────
+  if (result.accion.tipo === 'APLICAR_IMPORT') {
+    try {
+      const importOutput = await handleConfirmarImport(ctx);
+      // Persist new state (handleConfirmarImport returns newState but does NOT persist)
+      if (importOutput.newState !== workingState) {
+        await conversacionRepo.update(usuarioId, { estado: importOutput.newState, datosTemporales: {} });
+      }
+      rateLimiter.recordMessage(normalizedPhone, now);
+      return importOutput;
+    } catch (err) {
+      logger.error({
+        event: 'import_apply_failed',
+        err: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      }, 'fallo al aplicar cambios de importación');
+      rateLimiter.recordMessage(normalizedPhone, now);
+      return {
+        responses: ['Error al aplicar cambios. No se modificó nada.'],
+        newState: ConversationState.PREGUNTANDO_PRODUCTO, rejected: true,
       };
     }
   }
