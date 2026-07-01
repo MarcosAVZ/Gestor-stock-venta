@@ -189,16 +189,24 @@ export class WhatsAppWebJsAdapter implements WhatsAppMessagingPort {
   ): Promise<void> {
     this.assertReady();
     const chatId = this.toChatId(to);
+    const fs = await import('fs/promises');
     const { MessageMedia } = await import('whatsapp-web.js').then(m => m.default ?? m);
-    const media = MessageMedia.fromFilePath(filePath);
-    media.filename = options?.filename ?? media.filename;
+    const data = await fs.readFile(filePath);
+    const stat = await fs.stat(filePath);
+    const filename = options?.filename ?? 'datos.xlsx';
+    const media = new MessageMedia(
+      'application/octet-stream',
+      data.toString('base64'),
+      filename,
+      stat.size,
+    );
     await this.client.sendMessage(chatId, '', {
       media,
       sendMediaAsDocument: true,
       caption: options?.caption ?? '',
     });
     this.logger.info(
-      { event: 'whatsapp_message_sent', type: 'document', chatId, path: filePath, filename: media.filename },
+      { event: 'whatsapp_message_sent', type: 'document', chatId, path: filePath, filename, filesize: stat.size },
       'document sent',
     );
   }
